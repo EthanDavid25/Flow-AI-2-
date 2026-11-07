@@ -130,4 +130,26 @@ public class FlowAICoreTests
         Assert.True(settings.RequireConfirmationForConsequential);
         Assert.False(settings.StoreScreenshotsWithWorkflows);
     }
+
+    [Fact]
+    public void PointProtocolParser_Normalizes0To1Coordinates_WhenScreensProvided()
+    {
+        var screens = new List<ScreenInfo>
+        {
+            new ScreenInfo
+            {
+                ScreenIndex = 0,
+                PhysicalBounds = new BoundingBox(0, 0, 1920, 1080),
+                ScaleFactor = 1.0
+            }
+        };
+
+        string rawResponse = "Click the button [POINT:0.5,0.5:Center Button:screen0] now.";
+        var targets = PointProtocolParser.ParseTargets(rawResponse, out string cleanText, screens);
+
+        Assert.Single(targets);
+        Assert.Equal(960, targets[0].TargetPoint.X);
+        Assert.Equal(540, targets[0].TargetPoint.Y);
+        Assert.Equal("Center Button", targets[0].Label);
+    }
 }

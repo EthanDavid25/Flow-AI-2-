@@ -5,6 +5,7 @@ using FlowAI.AI;
 using FlowAI.AI.Providers;
 using FlowAI.AI.Security;
 using FlowAI.App.Hotkey;
+using FlowAI.App.Logging;
 using FlowAI.App.Tray;
 using FlowAI.App.UI;
 using FlowAI.Audio.Capture;
@@ -123,6 +124,7 @@ public partial class App : Application
         services.AddLogging(logging =>
         {
             logging.AddConsole();
+            logging.AddProvider(new FlowAILoggerProvider(LogLevel.Information));
             logging.SetMinimumLevel(LogLevel.Information);
         });
 
@@ -135,6 +137,9 @@ public partial class App : Application
         // AI providers
         services.AddSingleton<OllamaProvider>();
         services.AddSingleton<KimiProvider>();
+        services.AddSingleton<GeminiProvider>();
+        services.AddSingleton<OpenAIProvider>();
+        services.AddSingleton<ClaudeProvider>();
         services.AddSingleton<AIProviderFactory>();
         services.AddSingleton<IAIProvider>(sp =>
             sp.GetRequiredService<AIProviderFactory>().GetActiveProvider());
@@ -304,6 +309,7 @@ public partial class App : Application
     {
         try
         {
+            FlowAILoggerProvider.WriteEntry("AppLifecycle", LogLevel.Critical, $"Crash in {context}: {ex.Message}", ex);
             var logPath = System.IO.Path.Combine(
                 FlowAISettings.AppDataDirectory, "crash.log");
             System.IO.Directory.CreateDirectory(FlowAISettings.AppDataDirectory);

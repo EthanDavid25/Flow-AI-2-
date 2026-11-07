@@ -25,6 +25,8 @@ public sealed class KimiProvider : IAIProvider
     public string ProviderName => "Kimi (Moonshot AI)";
     public string CurrentModel => FlowAISettings.Current.KimiModel;
     public bool IsConfigured => !string.IsNullOrWhiteSpace(GetApiKey());
+    public bool IsLocal => false;
+    public AICapabilities Capabilities => AICapabilities.TextGeneration | AICapabilities.Vision | AICapabilities.Streaming | AICapabilities.StructuredOutput | AICapabilities.ToolCalling;
 
     public const string CostDisclosure = "Note: Kimi uses remote Moonshot AI APIs which may incur usage costs according to your API key plan.";
 
@@ -207,11 +209,44 @@ public sealed class KimiProvider : IAIProvider
 
         foreach (var msg in request.Messages)
         {
-            messagesArray.Add(new JsonObject
+            if (msg.Images != null && msg.Images.Count > 0)
             {
-                ["role"] = msg.Role,
-                ["content"] = msg.Content
-            });
+                var contentArr = new JsonArray
+                {
+                    new JsonObject
+                    {
+                        ["type"] = "text",
+                        ["text"] = msg.Content
+                    }
+                };
+
+                foreach (var imgBytes in msg.Images)
+                {
+                    string b64 = Convert.ToBase64String(imgBytes);
+                    contentArr.Add(new JsonObject
+                    {
+                        ["type"] = "image_url",
+                        ["image_url"] = new JsonObject
+                        {
+                            ["url"] = $"data:image/jpeg;base64,{b64}"
+                        }
+                    });
+                }
+
+                messagesArray.Add(new JsonObject
+                {
+                    ["role"] = msg.Role,
+                    ["content"] = contentArr
+                });
+            }
+            else
+            {
+                messagesArray.Add(new JsonObject
+                {
+                    ["role"] = msg.Role,
+                    ["content"] = msg.Content
+                });
+            }
         }
 
         if (!string.IsNullOrWhiteSpace(request.Prompt) && request.Messages.Count == 0)

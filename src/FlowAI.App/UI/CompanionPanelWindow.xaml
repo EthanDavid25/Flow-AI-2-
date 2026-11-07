@@ -188,16 +188,30 @@
                                VerticalAlignment="Center"
                                TextTrimming="CharacterEllipsis"/>
 
-                    <!-- AI provider badge -->
-                    <Border Grid.Column="1"
-                            Background="#1A2420"
-                            CornerRadius="4"
-                            Padding="6,2">
-                        <TextBlock x:Name="ProviderBadge"
-                                   Text="Ollama"
-                                   Foreground="{StaticResource EmeraldBrush}"
-                                   FontSize="10" FontWeight="SemiBold"/>
-                    </Border>
+                    <!-- Badges -->
+                    <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
+                        <!-- Mode badge: AUTO / ONLINE / OFFLINE -->
+                        <Border x:Name="ModeBadgeBorder"
+                                Background="#1E2A38"
+                                CornerRadius="4"
+                                Padding="5,2"
+                                Margin="0,0,5,0">
+                            <TextBlock x:Name="ModeBadge"
+                                       Text="AUTO"
+                                       Foreground="#64B5F6"
+                                       FontSize="9" FontWeight="Bold"/>
+                        </Border>
+                        <!-- AI provider badge -->
+                        <Border x:Name="ProviderBadgeBorder"
+                                Background="#1A2420"
+                                CornerRadius="4"
+                                Padding="6,2">
+                            <TextBlock x:Name="ProviderBadge"
+                                       Text="Ollama"
+                                       Foreground="{StaticResource EmeraldBrush}"
+                                       FontSize="10" FontWeight="SemiBold"/>
+                        </Border>
+                    </StackPanel>
                 </Grid>
             </Border>
 

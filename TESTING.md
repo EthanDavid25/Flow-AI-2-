@@ -15,8 +15,8 @@ Run with `BypassSandbox: true` in Antigravity agent (WASAPI/DPAPI require real p
 
 ## Test Projects
 
-### FlowAI.Core.Tests (7 tests)
-Tests the state machine, protocol parser, coordinate geometry, and settings.
+### FlowAI.Core.Tests (8 tests)
+Tests the state machine, protocol parser, coordinate geometry, settings, and coordinate normalization.
 
 | Test | What it covers |
 |---|---|
@@ -27,14 +27,18 @@ Tests the state machine, protocol parser, coordinate geometry, and settings.
 | `CoordinateTransform_ConvertsDipsAndPixelsAccurately` | DIP↔pixel conversion |
 | `CoordinateTransform_MapsNormalizedCoordinates_WithNegativeOrigins` | Multi-monitor |
 | `Settings_DefaultValues_AreCorrect` | Settings defaults |
+| `PointProtocolParser_Normalizes0To1Coordinates_WhenScreensProvided` | Vision model 0..1 scale normalization & bounds clamping |
 
-### FlowAI.AI.Tests (3 tests)
+### FlowAI.AI.Tests (6 tests)
 
 | Test | What it covers |
 |---|---|
 | `CredentialStore_EncryptsAndDecrypts_WithDPAPI` | DPAPI round-trip |
 | `AIProviderFactory_SwitchesBetweenProviders_Correctly` | Provider switching |
-| `AIProviderFactory_RecommendsLightweightVisionModel_For16GB` | Model recommendation |
+| `AIProviderFactory_RecommendsLightweightVisionModel_For16GB` | Model recommendation for low memory |
+| `AIProviderFactory_OperatingModeOffline_AlwaysForcesLocalProvider` | Strict offline mode routing |
+| `AIProviderFactory_OperatingModeOnline_RoutesToCloudProvider` | Online cloud provider routing |
+| `AIProviders_DeclareCorrectCapabilitiesAndLocalFlags` | Capability flags and IsLocal properties |
 
 ### FlowAI.Vision.Tests (3 tests)
 

@@ -1,47 +1,52 @@
 # IMPLEMENTATION_STATUS.md — FlowAI
 
 **Last updated**: 2026-11-07
-**Build status**: ✅ Builds (0 errors, 0 warnings)
-**Test status**: ✅ All 20 tests pass (Core:7, AI:3, Vision:3, Cursor:3, Integration:4)
+**Build status**: ✅ Builds in Debug & Release (0 errors, 0 warnings)
+**Test status**: ✅ All 26 tests pass (Core:8, AI:6, Vision:3, Cursor:3, Integration:6)
 
 ---
 
 ## ✅ Fully Implemented
 
-### Infrastructure
+### Infrastructure & Diagnostics
 - [x] Solution structure — 10 source projects + 5 test projects
 - [x] .NET 8 Windows Desktop SDK, WPF + Windows Forms
 - [x] DI composition root (`App.xaml.cs`)
 - [x] Single-instance mutex
 - [x] Global crash handler (dispatcher + AppDomain + task exception)
 - [x] Crash log (`%APPDATA%\FlowAI\crash.log`)
-- [x] First-run onboarding dialog
+- [x] Persistent diagnostic logger (`%APPDATA%\FlowAI\Logs\flowai_YYYYMMDD.log`) with thread-safe file sink
+- [x] First-run onboarding non-blocking tray balloon
 
-### AI
-- [x] `OllamaProvider` — chat, streaming, vision (base64 images), health check
-- [x] `KimiProvider` — optional, requires explicit API key
-- [x] `AIProviderFactory` — runtime switching between Ollama and Kimi
-- [x] `CredentialStore` — DPAPI encryption for Kimi key
+### Hybrid AI & Operating Modes
+- [x] `OperatingMode`: `AUTO` (Hybrid Intelligence: primary cloud with seamless local fallback), `ONLINE` (Cloud only), `OFFLINE` (100% local, zero remote inference, zero screenshot uploads, SAPI TTS)
+- [x] `OllamaProvider` — chat, streaming, vision (base64 images), health check, `IsLocal = true`
+- [x] `KimiProvider` — primary cloud provider, multimodal OpenAI-compatible `image_url` payload formatting
+- [x] Multi-provider extensible adapters: `GeminiProvider`, `OpenAIProvider`, `ClaudeProvider`
+- [x] `AIProviderFactory` — mode-aware provider resolution and capability checking
+- [x] `CredentialStore` — DPAPI encryption for provider API keys
 - [x] System prompt with POINT/BOX coordinate protocol
-- [x] Default model: `qwen3-vl:2b` (1.9 GB, vision-capable, Q4_K_M)
+- [x] Default quantized vision model: `qwen3-vl:2b` (optimal for 8 GB RAM)
 
-### Voice
-- [x] `WasapiAudioRecorder` — NAudio WASAPI capture
+### Voice & Audio
+- [x] `WasapiAudioRecorder` — NAudio WASAPI capture with device enumeration
+- [x] Microphone selector dropdown in Settings
 - [x] `WhisperTranscriptionService` — Whisper.net with auto-download
 - [x] `WindowsSpeechTranscriptionService` — Windows SAPI fallback
-- [x] `EdgeTtsService` — Free Microsoft neural TTS via WebSocket
-- [x] `WindowsSpeechTtsService` — Windows SAPI TTS fallback
+- [x] `EdgeTtsService` — Free Microsoft neural TTS via WebSocket (labeled network-dependent)
+- [x] `WindowsSpeechTtsService` — Windows SAPI TTS fallback (offline guaranteed)
 - [x] `GlobalHotkeyMonitor` — WH_KEYBOARD_LL on dedicated STA thread
 - [x] Push-to-talk: `Ctrl+Alt+Space` (hold = record, release = process)
 - [x] Escape to cancel any in-progress operation
 - [x] Audio level events → overlay waveform animation
 
-### Screen Understanding
-- [x] `ScreenCaptureService` — GDI CopyFromScreen, all monitors, 1280px resize
+### Screen Understanding & Coordinate Accuracy
+- [x] `ScreenCaptureService` — GDI CopyFromScreen, all monitors, 1280px resize for vision
 - [x] `UIAutomationDiscoveryService` — IElementDiscoveryService via Windows UIA
 - [x] `HybridElementLocator` — UIA → Vision AI fallback pipeline
 - [x] Overlay excluded from screen capture (`WDA_EXCLUDEFROMCAPTURE`)
 - [x] Multi-monitor coordinate protocol (`[...:screenN]`)
+- [x] Coordinate normalization & bounds clamping in `PointProtocolParser` (supports 0..1 scale and physical pixel mapping)
 
 ### Green Cursor Companion
 - [x] `OverlayWindow` — click-through, transparent, capture-excluded WPF window
@@ -68,10 +73,9 @@
 - [x] Action verification
 
 ### Interface & Tools
-- [x] `CompanionPanelWindow` — dark emerald WPF panel
+- [x] `CompanionPanelWindow` — dark emerald WPF panel with Mode badge (`[AUTO]`, `[ONLINE]`, `[OFFLINE]`) and Provider badge
 - [x] `TrayIconManager` — system tray with programmatic emerald icon
-- [x] `SettingsWindow` — 5-tab settings (AI, Voice, Appearance, Learning, Privacy)
-- [x] Microphone device dropdown selector using WASAPI endpoints
+- [x] `SettingsWindow` — 6-tab settings (AI & Models, Voice, Appearance, Learning, Privacy, Diagnostics)
 - [x] `MemoryViewerWindow` — complete SQLite database viewer & management window (Workflows, Corrections, Preferences, Task History, individual & clear-all deletion)
 - [x] Real-time streaming AI response token display in companion panel
 - [x] Workflow execution loop with cursor guidance and confirmed automation
@@ -80,24 +84,19 @@
 - [x] State indicator with pulse animation
 - [x] Push-to-talk button in panel
 - [x] Teaching session dialog
-- [x] Settings — all settings read/write with persistence
-
----
-
-## 🔶 Remaining Enhancements
-
-| Feature | Status | Notes |
-|---|---|---|
-| Release packaging (MSIX/WiX) | Planned | Standalone installer creation |
-| Privacy blur for sensitive fields | Planned | OCR masking on screen bitmap |
 
 ---
 
 ## Test Results (2026-11-07)
 
 ```
-FlowAI.Core.Tests        7/7  ✅
-FlowAI.AI.Tests          3/3  ✅
+FlowAI.Core.Tests        8/8  ✅
+FlowAI.AI.Tests          6/6  ✅
+FlowAI.Vision.Tests      3/3  ✅
+FlowAI.Cursor.Tests      3/3  ✅
+FlowAI.Integration.Tests 6/6  ✅
+Total: 26/26 passing (0 failures)
+```
 FlowAI.Vision.Tests      3/3  ✅
 FlowAI.Cursor.Tests      3/3  ✅
 FlowAI.Integration.Tests 6/6  ✅

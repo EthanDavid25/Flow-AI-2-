@@ -2,11 +2,25 @@ using FlowAI.Core.Models;
 
 namespace FlowAI.Core.Interfaces;
 
+[Flags]
+public enum AICapabilities
+{
+    None = 0,
+    TextGeneration = 1 << 0,
+    Vision = 1 << 1,
+    Streaming = 1 << 2,
+    StructuredOutput = 1 << 3,
+    ToolCalling = 1 << 4,
+    LocalInference = 1 << 5
+}
+
 public interface IAIProvider
 {
     string ProviderName { get; }
     string CurrentModel { get; }
     bool IsConfigured { get; }
+    bool IsLocal { get; }
+    AICapabilities Capabilities { get; }
 
     Task<AIResponse> SendChatAsync(AIRequest request, CancellationToken cancellationToken = default);
     IAsyncEnumerable<string> StreamChatAsync(AIRequest request, CancellationToken cancellationToken = default);

@@ -20,6 +20,8 @@ public sealed class OllamaProvider : IAIProvider
     public string ProviderName => "Ollama (Local)";
     public string CurrentModel => FlowAISettings.Current.OllamaModel;
     public bool IsConfigured => true; // Local default, no API key needed
+    public bool IsLocal => true;
+    public AICapabilities Capabilities => AICapabilities.TextGeneration | AICapabilities.Vision | AICapabilities.Streaming | AICapabilities.LocalInference;
 
     public OllamaProvider(HttpClient? httpClient = null, ILogger<OllamaProvider>? logger = null)
     {

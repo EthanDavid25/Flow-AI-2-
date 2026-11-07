@@ -20,7 +20,7 @@ public static class PointProtocolParser
         @"\[BOX:\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*:\s*([^:\]]+)(?::screen(\d+))?\]",
         RegexOptions.Compiled | RegexOptions.IgnoreCase);
 
-    public static List<DetectedTarget> ParseTargets(string rawText, out string cleanText)
+    public static List<DetectedTarget> ParseTargets(string rawText, out string cleanText, IReadOnlyList<ScreenInfo>? screens = null)
     {
         var targets = new List<DetectedTarget>();
         if (string.IsNullOrWhiteSpace(rawText))
@@ -45,8 +45,26 @@ public static class PointProtocolParser
                     screenIndex = parsedScreen;
                 }
 
-                var box = new BoundingBox(x, y, w, h);
-                var target = new DetectedTarget(box.Center.X, box.Center.Y, label, screenIndex, box)
+                ScreenInfo? screen = FindScreen(screens, screenIndex);
+                BoundingBox box;
+
+                // Check for normalized 0..1 scale
+                if (screen != null && x >= 0.0 && x <= 1.0 && y >= 0.0 && y <= 1.0 && w <= 1.0 && h <= 1.0)
+                {
+                    box = Geometry.CoordinateTransform.NormalizedToScreenBox(x, y, w, h, screen);
+                }
+                else
+                {
+                    box = new BoundingBox(x, y, w, h);
+                }
+
+                var center = box.Center;
+                if (screen != null)
+                {
+                    center = Geometry.CoordinateTransform.ClampToScreen(center, screen);
+                }
+
+                var target = new DetectedTarget(center.X, center.Y, label, screenIndex, box)
                 {
                     Source = DetectionSource.PointProtocol
                 };
@@ -68,7 +86,25 @@ public static class PointProtocolParser
                     screenIndex = parsedScreen;
                 }
 
-                var target = new DetectedTarget(x, y, label, screenIndex)
+                ScreenInfo? screen = FindScreen(screens, screenIndex);
+                CoordinatePoint pt;
+
+                // Check for normalized 0..1 scale
+                if (screen != null && x >= 0.0 && x <= 1.0 && y >= 0.0 && y <= 1.0)
+                {
+                    pt = Geometry.CoordinateTransform.NormalizedToScreenPixels(x, y, screen);
+                }
+                else
+                {
+                    pt = new CoordinatePoint(x, y);
+                }
+
+                if (screen != null)
+                {
+                    pt = Geometry.CoordinateTransform.ClampToScreen(pt, screen);
+                }
+
+                var target = new DetectedTarget(pt.X, pt.Y, label, screenIndex)
                 {
                     Source = DetectionSource.PointProtocol
                 };
@@ -84,5 +120,15 @@ public static class PointProtocolParser
         cleanText = Regex.Replace(stripped, @"[ \t]{2,}", " ").Trim();
 
         return targets;
+    }
+
+    private static ScreenInfo? FindScreen(IReadOnlyList<ScreenInfo>? screens, int screenIndex)
+    {
+        if (screens == null || screens.Count == 0) return null;
+        for (int i = 0; i < screens.Count; i++)
+        {
+            if (screens[i].ScreenIndex == screenIndex) return screens[i];
+        }
+        return screens[0];
     }
 }

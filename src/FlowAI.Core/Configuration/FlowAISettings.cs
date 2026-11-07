@@ -36,12 +36,19 @@ public sealed class FlowAISettings
     public static string SettingsFilePath =>
         System.IO.Path.Combine(AppDataDirectory, "settings.json");
 
+    // ── Operating Mode Settings ─────────────────────────────────────
+    public string OperatingMode { get; set; } = "Auto"; // "Auto", "Online", "Offline"
+
     // ── AI Provider Settings ─────────────────────────────────────────
-    public string AIProvider { get; set; } = "Ollama"; // "Ollama", "Kimi"
+    public string AIProvider { get; set; } = "Ollama"; // "Ollama", "Kimi", "Gemini", "OpenAI", "Claude"
+    public string ActiveCloudProvider { get; set; } = "Kimi"; // "Kimi", "Gemini", "OpenAI", "Claude"
     public string OllamaEndpoint { get; set; } = "http://127.0.0.1:11434";
     public string OllamaModel { get; set; } = "qwen3-vl:2b";
     public string KimiEndpoint { get; set; } = "https://api.moonshot.cn/v1";
     public string KimiModel { get; set; } = "moonshot-v1-auto";
+    public string GeminiModel { get; set; } = "gemini-1.5-flash";
+    public string OpenAIModel { get; set; } = "gpt-4o-mini";
+    public string ClaudeModel { get; set; } = "claude-3-5-sonnet";
 
     // ── Voice & Audio Settings ───────────────────────────────────────
     public string Hotkey { get; set; } = "Ctrl+Alt+Space";

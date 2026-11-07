@@ -58,8 +58,32 @@ public partial class CompanionPanelWindow : Window
         _manager.AudioLevelChanged += OnAudioLevel;
 
         // Initial values
-        ProviderBadge.Text = manager.AIProviderName;
+        UpdateBadges();
         StatusText.Text = manager.IsAIConnected ? $"Connected — {manager.CurrentModel}" : "Offline — start Ollama";
+    }
+
+    public void UpdateBadges()
+    {
+        if (_manager == null) return;
+        string mode = FlowAI.Core.Configuration.FlowAISettings.Current.OperatingMode?.ToUpperInvariant() ?? "AUTO";
+        ModeBadge.Text = mode;
+        if (mode == "OFFLINE")
+        {
+            ModeBadge.Foreground = new SolidColorBrush(Color.FromRgb(255, 171, 64)); // Orange/amber
+            ModeBadgeBorder.Background = new SolidColorBrush(Color.FromArgb(50, 255, 171, 64));
+        }
+        else if (mode == "ONLINE")
+        {
+            ModeBadge.Foreground = new SolidColorBrush(Color.FromRgb(66, 165, 245)); // Blue
+            ModeBadgeBorder.Background = new SolidColorBrush(Color.FromArgb(50, 66, 165, 245));
+        }
+        else
+        {
+            ModeBadge.Foreground = new SolidColorBrush(Color.FromRgb(0, 230, 118)); // Green
+            ModeBadgeBorder.Background = new SolidColorBrush(Color.FromArgb(50, 0, 230, 118));
+        }
+
+        ProviderBadge.Text = _manager.AIProviderName;
     }
 
     // ── Window chrome / no-activate ───────────────────────────────────────────
@@ -143,6 +167,7 @@ public partial class CompanionPanelWindow : Window
         Dispatcher.BeginInvoke(() =>
         {
             StatusText.Text = status;
+            UpdateBadges();
         }, DispatcherPriority.Normal);
     }
 

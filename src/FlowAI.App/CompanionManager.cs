@@ -1,3 +1,4 @@
+using FlowAI.AI;
 using FlowAI.AI.Providers;
 using FlowAI.Audio.Capture;
 using FlowAI.Audio.Transcription;
@@ -39,7 +40,8 @@ public sealed class CompanionManager : IDisposable
     private readonly IAudioRecordingService _recorder;
     private readonly ITranscriptionService _transcription;
     private readonly ITextToSpeechService _tts;
-    private readonly IAIProvider _ai;
+    private readonly WindowsSpeechTtsService _offlineTts;
+    private readonly AIProviderFactory _aiFactory;
     private readonly IMemoryStore _memory;
     private readonly ILearningEngine _learning;
     private readonly IComputerAutomationService _automation;
@@ -59,8 +61,9 @@ public sealed class CompanionManager : IDisposable
 
     // ── Readonly accessors ────────────────────────────────────────────────────
     public FlowAIState CurrentState => _stateManager.CurrentState;
-    public string CurrentModel => _ai.CurrentModel;
-    public string AIProviderName => _ai.ProviderName;
+    public IAIProvider ActiveAI => _aiFactory.GetActiveProvider();
+    public string CurrentModel => ActiveAI.CurrentModel;
+    public string AIProviderName => ActiveAI.ProviderName;
     public bool IsAIConnected { get; private set; }
 
     public CompanionManager(
@@ -72,7 +75,8 @@ public sealed class CompanionManager : IDisposable
         IAudioRecordingService recorder,
         ITranscriptionService transcription,
         ITextToSpeechService tts,
-        IAIProvider ai,
+        WindowsSpeechTtsService offlineTts,
+        AIProviderFactory aiFactory,
         IMemoryStore memory,
         ILearningEngine learning,
         IComputerAutomationService automation,
@@ -86,7 +90,8 @@ public sealed class CompanionManager : IDisposable
         _recorder = recorder;
         _transcription = transcription;
         _tts = tts;
-        _ai = ai;
+        _offlineTts = offlineTts;
+        _aiFactory = aiFactory;
         _memory = memory;
         _learning = learning;
         _automation = automation;
@@ -107,11 +112,12 @@ public sealed class CompanionManager : IDisposable
         await _memory.InitializeAsync();
         _logger.LogInformation("SQLite memory store ready");
 
-        IsAIConnected = await _ai.HealthCheckAsync(cancellationToken);
-        _logger.LogInformation("AI health {Provider}: {Status}", _ai.ProviderName, IsAIConnected ? "OK" : "OFFLINE");
+        IsAIConnected = await ActiveAI.HealthCheckAsync(cancellationToken);
+        _logger.LogInformation("AI health {Provider}: {Status}", ActiveAI.ProviderName, IsAIConnected ? "OK" : "OFFLINE");
+        string modeLabel = _settings.OperatingMode?.ToUpperInvariant() ?? "AUTO";
         StatusUpdated?.Invoke(IsAIConnected
-            ? $"Connected — {_ai.ProviderName} ({_ai.CurrentModel})"
-            : $"{_ai.ProviderName} offline — start Ollama");
+            ? $"[{modeLabel}] Connected — {ActiveAI.ProviderName} ({ActiveAI.CurrentModel})"
+            : $"[{modeLabel}] {ActiveAI.ProviderName} offline");
 
         // Warm-up transcription in background (don't block startup)
         _ = Task.Run(async () =>
@@ -282,13 +288,19 @@ public sealed class CompanionManager : IDisposable
             MaxTokens = 1024
         };
 
-        // 4. Send to AI (with real-time streaming)
+        // 4. Send to AI (with real-time streaming and hybrid fallback)
+        var provider = _aiFactory.GetActiveProvider();
+        if (_settings.OperatingMode.Equals("Offline", StringComparison.OrdinalIgnoreCase))
+        {
+            provider = _aiFactory.LocalProvider;
+        }
+
         string fullRawResponse = string.Empty;
         var durationWatch = System.Diagnostics.Stopwatch.StartNew();
 
         try
         {
-            await foreach (var chunk in _ai.StreamChatAsync(request, cancellationToken))
+            await foreach (var chunk in provider.StreamChatAsync(request, cancellationToken))
             {
                 fullRawResponse += chunk;
                 ResponseStreamChunk?.Invoke(chunk);
@@ -296,28 +308,58 @@ public sealed class CompanionManager : IDisposable
         }
         catch (Exception ex)
         {
-            _logger.LogDebug(ex, "StreamChatAsync fell back to SendChatAsync");
+            _logger.LogWarning(ex, "Provider {Provider} streaming failed", provider.ProviderName);
         }
 
         if (string.IsNullOrWhiteSpace(fullRawResponse))
         {
-            var directResponse = await _ai.SendChatAsync(request, cancellationToken);
+            var directResponse = await provider.SendChatAsync(request, cancellationToken);
             if (!directResponse.IsSuccess)
             {
-                _logger.LogWarning("AI error: {Error}", directResponse.ErrorMessage);
-                _stateManager.TransitionTo(FlowAIState.Error, directResponse.ErrorMessage);
-                StatusUpdated?.Invoke($"AI error: {directResponse.ErrorMessage}");
-                await Task.Delay(3000, CancellationToken.None);
-                _stateManager.ResetToIdle();
-                return;
+                // In AUTO mode: If cloud fails, seamlessly retry with local Ollama!
+                if (!provider.IsLocal && _settings.OperatingMode.Equals("Auto", StringComparison.OrdinalIgnoreCase))
+                {
+                    _logger.LogWarning("Cloud provider {Provider} failed: {Err} — seamlessly falling back to local Ollama",
+                        provider.ProviderName, directResponse.ErrorMessage);
+                    StatusUpdated?.Invoke($"Cloud offline — falling back to local Ollama…");
+
+                    var localProv = _aiFactory.LocalProvider;
+                    var localResponse = await localProv.SendChatAsync(request, cancellationToken);
+                    if (localResponse.IsSuccess)
+                    {
+                        fullRawResponse = localResponse.RawText;
+                        provider = localProv;
+                    }
+                    else
+                    {
+                        _stateManager.TransitionTo(FlowAIState.Error, localResponse.ErrorMessage);
+                        StatusUpdated?.Invoke($"AI error: {localResponse.ErrorMessage}");
+                        await Task.Delay(3000, CancellationToken.None);
+                        _stateManager.ResetToIdle();
+                        return;
+                    }
+                }
+                else
+                {
+                    _logger.LogWarning("AI error: {Error}", directResponse.ErrorMessage);
+                    _stateManager.TransitionTo(FlowAIState.Error, directResponse.ErrorMessage);
+                    StatusUpdated?.Invoke($"AI error: {directResponse.ErrorMessage}");
+                    await Task.Delay(3000, CancellationToken.None);
+                    _stateManager.ResetToIdle();
+                    return;
+                }
             }
-            fullRawResponse = directResponse.RawText;
+            else
+            {
+                fullRawResponse = directResponse.RawText;
+            }
         }
 
         durationWatch.Stop();
 
-        // 5. Parse targets
-        var targets = PointProtocolParser.ParseTargets(fullRawResponse, out string cleanText);
+        // 5. Parse targets (with screen coordinate normalization)
+        var screenInfos = screens.Select(s => s.ScreenInfo).ToList();
+        var targets = PointProtocolParser.ParseTargets(fullRawResponse, out string cleanText, screenInfos);
 
         ResponseUpdated?.Invoke(cleanText);
         _logger.LogInformation("AI response ({N} targets): {Text}", targets.Count, cleanText);
@@ -336,12 +378,29 @@ public sealed class CompanionManager : IDisposable
             }
         }
 
-        // 7. Speak
+        // 7. Speak (with guaranteed offline fallback)
         _stateManager.TransitionTo(FlowAIState.Speaking, "Guiding complete");
         StatusUpdated?.Invoke("Speaking…");
 
         if (!string.IsNullOrWhiteSpace(cleanText))
-            await _tts.SpeakAsync(cleanText, cancellationToken);
+        {
+            if (_settings.OperatingMode.Equals("Offline", StringComparison.OrdinalIgnoreCase))
+            {
+                await _offlineTts.SpeakAsync(cleanText, cancellationToken);
+            }
+            else
+            {
+                try
+                {
+                    await _tts.SpeakAsync(cleanText, cancellationToken);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Primary TTS failed; falling back to offline Windows Speech");
+                    await _offlineTts.SpeakAsync(cleanText, cancellationToken);
+                }
+            }
+        }
 
         // 8. Record history
         if (_settings.LearningEnabled)
@@ -351,7 +410,7 @@ public sealed class CompanionManager : IDisposable
                 TaskQuery = userText,
                 ApplicationName = activeApp,
                 IsSuccess = true,
-                ModelUsed = _ai.CurrentModel,
+                ModelUsed = provider.CurrentModel,
                 DurationMilliseconds = durationWatch.ElapsedMilliseconds
             });
         }
@@ -537,7 +596,7 @@ public sealed class CompanionManager : IDisposable
     // ── Health check ──────────────────────────────────────────────────────────
     public async Task<bool> CheckAIHealthAsync()
     {
-        IsAIConnected = await _ai.HealthCheckAsync();
+        IsAIConnected = await ActiveAI.HealthCheckAsync();
         return IsAIConnected;
     }
 

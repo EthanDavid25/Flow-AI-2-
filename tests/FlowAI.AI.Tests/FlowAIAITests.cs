@@ -51,4 +51,76 @@ public class FlowAIAITests
         string recommended = AIProviderFactory.RecommendDefaultModel();
         Assert.Equal("qwen3-vl:2b", recommended);
     }
+
+    [Fact]
+    public void AIProviderFactory_OperatingModeOffline_AlwaysForcesLocalProvider()
+    {
+        var ollama = new OllamaProvider();
+        var kimi = new KimiProvider();
+        var factory = new AIProviderFactory(ollama, kimi);
+
+        string originalMode = FlowAISettings.Current.OperatingMode;
+        string originalProvider = FlowAISettings.Current.AIProvider;
+
+        try
+        {
+            FlowAISettings.Current.OperatingMode = "Offline";
+            FlowAISettings.Current.AIProvider = "Kimi";
+
+            var provider = factory.GetActiveProvider();
+            Assert.True(provider.IsLocal);
+            Assert.Equal("Ollama (Local)", provider.ProviderName);
+        }
+        finally
+        {
+            FlowAISettings.Current.OperatingMode = originalMode;
+            FlowAISettings.Current.AIProvider = originalProvider;
+        }
+    }
+
+    [Fact]
+    public void AIProviderFactory_OperatingModeOnline_RoutesToCloudProvider()
+    {
+        var ollama = new OllamaProvider();
+        var kimi = new KimiProvider();
+        var gemini = new GeminiProvider();
+        var factory = new AIProviderFactory(ollama, kimi, geminiProvider: gemini);
+
+        string originalMode = FlowAISettings.Current.OperatingMode;
+        string originalCloud = FlowAISettings.Current.ActiveCloudProvider;
+        string originalProvider = FlowAISettings.Current.AIProvider;
+
+        try
+        {
+            FlowAISettings.Current.OperatingMode = "Online";
+            FlowAISettings.Current.AIProvider = ""; // Don't override
+            FlowAISettings.Current.ActiveCloudProvider = "Gemini";
+
+            var provider = factory.GetActiveProvider();
+            Assert.False(provider.IsLocal);
+            Assert.Contains("Gemini", provider.ProviderName);
+        }
+        finally
+        {
+            FlowAISettings.Current.OperatingMode = originalMode;
+            FlowAISettings.Current.ActiveCloudProvider = originalCloud;
+            FlowAISettings.Current.AIProvider = originalProvider;
+        }
+    }
+
+    [Fact]
+    public void AIProviders_DeclareCorrectCapabilitiesAndLocalFlags()
+    {
+        var ollama = new OllamaProvider();
+        var kimi = new KimiProvider();
+        var gemini = new GeminiProvider();
+
+        Assert.True(ollama.IsLocal);
+        Assert.True(ollama.Capabilities.HasFlag(Core.Interfaces.AICapabilities.LocalInference));
+
+        Assert.False(kimi.IsLocal);
+        Assert.False(gemini.IsLocal);
+        Assert.True(kimi.Capabilities.HasFlag(Core.Interfaces.AICapabilities.Vision));
+        Assert.True(gemini.Capabilities.HasFlag(Core.Interfaces.AICapabilities.Vision));
+    }
 }
