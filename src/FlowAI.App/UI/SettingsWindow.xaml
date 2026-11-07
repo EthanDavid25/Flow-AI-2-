@@ -112,6 +112,9 @@
                         <TextBlock Text="Currently fixed to Ctrl+Alt+Space (configurable in future)"
                                    FontSize="10" Foreground="{StaticResource Muted}" Margin="0,0,0,16"/>
 
+                        <Label Content="Microphone Input Device"/>
+                        <ComboBox x:Name="InputDeviceCombo" Margin="0,0,0,16"/>
+
                         <Label Content="Speech Recognition (STT)"/>
                         <ComboBox x:Name="SttCombo" Margin="0,0,0,16">
                             <ComboBoxItem Content="Whisper (Local — Recommended)" Tag="Whisper"/>

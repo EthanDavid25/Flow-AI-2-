@@ -52,7 +52,7 @@ Tests the state machine, protocol parser, coordinate geometry, and settings.
 | `BezierFlightPath_ReachesTarget_AtT1` | Bézier accuracy |
 | `EmeraldCursorGeometry_ProducesValidGeometry` | Cursor path geometry |
 
-### FlowAI.Integration.Tests (4 tests)
+### FlowAI.Integration.Tests (6 tests)
 
 | Test | What it covers |
 |---|---|
@@ -60,6 +60,8 @@ Tests the state machine, protocol parser, coordinate geometry, and settings.
 | `LearningEngine_RecordsAndRetrieves_TaughtWorkflow` | Workflow recording+retrieval |
 | `LearningEngine_LearnsCorrection_AndReturnsCorrectedTarget` | Correction learning |
 | `AutomationEngine_BlocksHighRiskAction_WhenUnconfirmed` | Risk gate |
+| `SqliteMemoryStore_DeletesCorrection_AndPreferences` | Deletion of corrections and preferences |
+| `SqliteMemoryStore_ClearsAllData` | Complete memory wipe |
 
 ## Manual Testing Checklist
 

@@ -30,6 +30,7 @@ public partial class CompanionPanelWindow : Window
     private readonly ILogger<CompanionPanelWindow>? _logger;
     private CompanionManager? _manager;
     private bool _isTeachingSession;
+    private TextBlock? _currentStreamingTextBlock;
     private readonly List<(string role, string text)> _chatHistory = new();
     private const int MaxChatMessages = 20;
 
@@ -52,6 +53,7 @@ public partial class CompanionPanelWindow : Window
         _manager.StateChanged += OnStateChanged;
         _manager.TranscriptUpdated += OnTranscriptUpdated;
         _manager.ResponseUpdated += OnResponseUpdated;
+        _manager.ResponseStreamChunk += OnResponseStreamChunk;
         _manager.StatusUpdated += OnStatusUpdated;
         _manager.AudioLevelChanged += OnAudioLevel;
 
@@ -98,12 +100,42 @@ public partial class CompanionPanelWindow : Window
 
     private void OnTranscriptUpdated(string text)
     {
-        Dispatcher.BeginInvoke(() => AppendChatBubble("user", text), DispatcherPriority.Normal);
+        Dispatcher.BeginInvoke(() =>
+        {
+            _currentStreamingTextBlock = null;
+            AppendChatBubble("user", text);
+        }, DispatcherPriority.Normal);
+    }
+
+    private void OnResponseStreamChunk(string chunk)
+    {
+        Dispatcher.BeginInvoke(() =>
+        {
+            if (_currentStreamingTextBlock == null)
+            {
+                _currentStreamingTextBlock = CreateAiBubble();
+            }
+            _currentStreamingTextBlock.Text += chunk;
+            ChatScrollViewer.ScrollToEnd();
+        }, DispatcherPriority.Normal);
     }
 
     private void OnResponseUpdated(string text)
     {
-        Dispatcher.BeginInvoke(() => AppendChatBubble("ai", text), DispatcherPriority.Normal);
+        Dispatcher.BeginInvoke(() =>
+        {
+            if (_currentStreamingTextBlock != null)
+            {
+                _currentStreamingTextBlock.Text = text;
+                _chatHistory.Add(("ai", text));
+                _currentStreamingTextBlock = null;
+            }
+            else
+            {
+                AppendChatBubble("ai", text);
+            }
+            ChatScrollViewer.ScrollToEnd();
+        }, DispatcherPriority.Normal);
     }
 
     private void OnStatusUpdated(string status)
@@ -127,6 +159,33 @@ public partial class CompanionPanelWindow : Window
     }
 
     // ── Chat bubble rendering ─────────────────────────────────────────────────
+    private TextBlock CreateAiBubble()
+    {
+        var bubble = new Border
+        {
+            CornerRadius = new CornerRadius(12, 12, 12, 2),
+            Background = new SolidColorBrush(Color.FromRgb(23, 25, 24)),
+            Padding = new Thickness(10, 6, 10, 6),
+            Margin = new Thickness(0, 2, 40, 2),
+            HorizontalAlignment = HorizontalAlignment.Left,
+            MaxWidth = 300
+        };
+
+        var tb = new TextBlock
+        {
+            Text = string.Empty,
+            Foreground = new SolidColorBrush(Color.FromRgb(232, 245, 233)),
+            FontSize = 12,
+            TextWrapping = TextWrapping.Wrap,
+            LineHeight = 18
+        };
+
+        bubble.Child = tb;
+        ChatPanel.Children.Add(bubble);
+        ChatScrollViewer.ScrollToEnd();
+        return tb;
+    }
+
     private void AppendChatBubble(string role, string text)
     {
         if (string.IsNullOrWhiteSpace(text)) return;

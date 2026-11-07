@@ -67,57 +67,41 @@
 - [x] High-risk action confirmation gate
 - [x] Action verification
 
-### Interface
+### Interface & Tools
 - [x] `CompanionPanelWindow` — dark emerald WPF panel
 - [x] `TrayIconManager` — system tray with programmatic emerald icon
 - [x] `SettingsWindow` — 5-tab settings (AI, Voice, Appearance, Learning, Privacy)
+- [x] Microphone device dropdown selector using WASAPI endpoints
+- [x] `MemoryViewerWindow` — complete SQLite database viewer & management window (Workflows, Corrections, Preferences, Task History, individual & clear-all deletion)
+- [x] Real-time streaming AI response token display in companion panel
+- [x] Workflow execution loop with cursor guidance and confirmed automation
+- [x] Automatic learned correction retrieval during queries
 - [x] Chat transcript with animated message bubbles
 - [x] State indicator with pulse animation
 - [x] Push-to-talk button in panel
 - [x] Teaching session dialog
 - [x] Settings — all settings read/write with persistence
 
-### Parsing & Geometry
-- [x] `PointProtocolParser` — POINT and BOX tags, text cleaning
-- [x] `CoordinateTransform` — DIP↔pixel, multi-monitor, negative origins
-- [x] `FlowAIStateManager` — 12-state thread-safe state machine
-
 ---
 
-## 🔶 Partially Implemented
+## 🔶 Remaining Enhancements
 
 | Feature | Status | Notes |
 |---|---|---|
-| Memory viewer window | 40% | Shows MessageBox placeholder; full CRUD UI needed |
-| Streaming AI response | 60% | `StreamChatAsync` exists in providers; not wired to panel |
-| Audio device selector | 20% | Settings UI has fields; not yet populated with real devices |
-| Workflow execution | 30% | Steps stored; execution loop not implemented |
-
----
-
-## ❌ Not Yet Implemented
-
-| Feature | Priority | Notes |
-|---|---|---|
-| Full memory browser UI | Medium | View/delete preferences, corrections, workflows |
-| Streaming response display | Medium | Show words as they arrive in companion panel |
-| Workflow execution engine | Medium | Run recorded workflows step-by-step with confirmation |
-| Release packaging (MSIX/WiX) | Low | For distribution |
-| Auto-update mechanism | Low | |
-| Multi-language voice support | Low | Edge TTS supports many languages |
-| Privacy blur for sensitive fields | Medium | Architecture exists; OCR masking not hooked up |
+| Release packaging (MSIX/WiX) | Planned | Standalone installer creation |
+| Privacy blur for sensitive fields | Planned | OCR masking on screen bitmap |
 
 ---
 
 ## Test Results (2026-11-07)
 
 ```
-FlowAI.Core.Tests       7/7  ✅
-FlowAI.AI.Tests         3/3  ✅
-FlowAI.Vision.Tests     3/3  ✅
-FlowAI.Cursor.Tests     3/3  ✅
-FlowAI.Integration.Tests 4/4 ✅
-Total                  20/20 ✅
+FlowAI.Core.Tests        7/7  ✅
+FlowAI.AI.Tests          3/3  ✅
+FlowAI.Vision.Tests      3/3  ✅
+FlowAI.Cursor.Tests      3/3  ✅
+FlowAI.Integration.Tests 6/6  ✅
+Total                   22/22 ✅
 ```
 
 ---

@@ -242,13 +242,16 @@ public partial class App : Application
 
     private void ShowMemory()
     {
-        // Memory window — simple info dialog for now, full implementation later
-        MessageBox.Show(
-            $"FlowAI Memory\n\nDatabase: {SqliteMemoryStore.DatabaseFilePath}\n\n" +
-            "Full memory viewer coming in next update.\n\n" +
-            "To clear all data, delete the database file and restart FlowAI.",
-            "Memory & Learning",
-            MessageBoxButton.OK, MessageBoxImage.Information);
+        var memoryStore = _services?.GetRequiredService<IMemoryStore>();
+        if (memoryStore == null) return;
+
+        var memoryWindow = new MemoryViewerWindow(
+            memoryStore,
+            _services?.GetService<ILogger<MemoryViewerWindow>>())
+        {
+            Owner = _panel
+        };
+        memoryWindow.Show();
     }
 
     private void ShowFirstRun()

@@ -1,6 +1,7 @@
 using System.Net.Http;
 using System.Windows;
 using FlowAI.AI.Security;
+using FlowAI.Audio.Capture;
 using FlowAI.Core.Configuration;
 using Microsoft.Extensions.Logging;
 
@@ -37,6 +38,27 @@ public partial class SettingsWindow : Window
 
         // Voice
         HotkeyBox.Text = _settings.Hotkey;
+
+        try
+        {
+            var devices = WasapiAudioRecorder.GetCaptureDevices();
+            InputDeviceCombo.Items.Clear();
+            var defaultItem = new System.Windows.Controls.ComboBoxItem { Content = "Default Windows Microphone", Tag = "" };
+            InputDeviceCombo.Items.Add(defaultItem);
+            int selectedIndex = 0;
+            for (int i = 0; i < devices.Count; i++)
+            {
+                var item = new System.Windows.Controls.ComboBoxItem { Content = devices[i].name, Tag = devices[i].id };
+                InputDeviceCombo.Items.Add(item);
+                if (!string.IsNullOrEmpty(_settings.InputDeviceId) && _settings.InputDeviceId == devices[i].id)
+                {
+                    selectedIndex = i + 1;
+                }
+            }
+            InputDeviceCombo.SelectedIndex = selectedIndex;
+        }
+        catch { }
+
         SttCombo.SelectedIndex = _settings.SttProvider == "WindowsSpeech" ? 1 : 0;
         WhisperModelCombo.SelectedIndex = _settings.WhisperModel switch
         {
@@ -111,6 +133,11 @@ public partial class SettingsWindow : Window
         }
 
         // Voice
+        if (InputDeviceCombo.SelectedItem is System.Windows.Controls.ComboBoxItem devItem)
+        {
+            _settings.InputDeviceId = string.IsNullOrWhiteSpace(devItem.Tag?.ToString()) ? null : devItem.Tag.ToString();
+        }
+
         var sttItem = SttCombo.SelectedItem as System.Windows.Controls.ComboBoxItem;
         _settings.SttProvider = sttItem?.Tag?.ToString() ?? "Whisper";
 

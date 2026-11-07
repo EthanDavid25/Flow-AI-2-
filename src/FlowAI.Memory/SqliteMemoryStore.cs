@@ -166,6 +166,16 @@ public sealed class SqliteMemoryStore : IMemoryStore
         return list;
     }
 
+    public async Task DeletePreferenceAsync(string key)
+    {
+        await InitializeAsync();
+        using var conn = new SqliteConnection(connectionString);
+        await conn.OpenAsync();
+        using var cmd = new SqliteCommand("DELETE FROM UserPreferences WHERE key = @k;", conn);
+        cmd.Parameters.AddWithValue("@k", key);
+        await cmd.ExecuteNonQueryAsync();
+    }
+
     public async Task SaveFactAsync(LearnedFact fact)
     {
         await InitializeAsync();
@@ -204,6 +214,16 @@ public sealed class SqliteMemoryStore : IMemoryStore
             });
         }
         return list;
+    }
+
+    public async Task DeleteFactAsync(long id)
+    {
+        await InitializeAsync();
+        using var conn = new SqliteConnection(connectionString);
+        await conn.OpenAsync();
+        using var cmd = new SqliteCommand("DELETE FROM LearnedFacts WHERE id = @id;", conn);
+        cmd.Parameters.AddWithValue("@id", id);
+        await cmd.ExecuteNonQueryAsync();
     }
 
     public async Task SaveCorrectionAsync(CorrectionRecord correction)
@@ -253,6 +273,43 @@ public sealed class SqliteMemoryStore : IMemoryStore
             });
         }
         return list;
+    }
+
+    public async Task<IReadOnlyList<CorrectionRecord>> GetAllCorrectionsAsync()
+    {
+        await InitializeAsync();
+        var list = new List<CorrectionRecord>();
+        using var conn = new SqliteConnection(connectionString);
+        await conn.OpenAsync();
+
+        string sql = "SELECT id, app_name, window_title, user_query, wrong_target, corrected_target, selector_json, created_at FROM Corrections ORDER BY id DESC;";
+        using var cmd = new SqliteCommand(sql, conn);
+        using var reader = await cmd.ExecuteReaderAsync();
+        while (await reader.ReadAsync())
+        {
+            list.Add(new CorrectionRecord
+            {
+                Id = reader.GetInt64(0),
+                ApplicationName = reader.GetString(1),
+                WindowTitle = reader.GetString(2),
+                UserQuery = reader.GetString(3),
+                WrongTargetLabel = reader.GetString(4),
+                CorrectedTargetLabel = reader.GetString(5),
+                ElementSelectorJson = reader.GetString(6),
+                CreatedAt = DateTime.TryParse(reader.GetString(7), out var dt) ? dt : DateTime.UtcNow
+            });
+        }
+        return list;
+    }
+
+    public async Task DeleteCorrectionAsync(long id)
+    {
+        await InitializeAsync();
+        using var conn = new SqliteConnection(connectionString);
+        await conn.OpenAsync();
+        using var cmd = new SqliteCommand("DELETE FROM Corrections WHERE id = @id;", conn);
+        cmd.Parameters.AddWithValue("@id", id);
+        await cmd.ExecuteNonQueryAsync();
     }
 
     public async Task<long> SaveWorkflowAsync(LearnedWorkflow workflow)

@@ -29,6 +29,36 @@ public sealed class WasapiAudioRecorder : IAudioRecordingService
         this.logger = logger;
     }
 
+    public static IReadOnlyList<(string id, string name)> GetCaptureDevices()
+    {
+        var list = new List<(string, string)>();
+        try
+        {
+            var enumerator = new MMDeviceEnumerator();
+            foreach (var dev in enumerator.EnumerateAudioEndPoints(DataFlow.Capture, DeviceState.Active))
+            {
+                list.Add((dev.ID, dev.FriendlyName));
+            }
+        }
+        catch { }
+        return list;
+    }
+
+    public static IReadOnlyList<(string id, string name)> GetRenderDevices()
+    {
+        var list = new List<(string, string)>();
+        try
+        {
+            var enumerator = new MMDeviceEnumerator();
+            foreach (var dev in enumerator.EnumerateAudioEndPoints(DataFlow.Render, DeviceState.Active))
+            {
+                list.Add((dev.ID, dev.FriendlyName));
+            }
+        }
+        catch { }
+        return list;
+    }
+
     public void StartRecording()
     {
         lock (syncLock)
@@ -38,16 +68,27 @@ public sealed class WasapiAudioRecorder : IAudioRecordingService
             try
             {
                 var deviceEnumerator = new MMDeviceEnumerator();
-                var defaultDevice = deviceEnumerator.GetDefaultAudioEndpoint(DataFlow.Capture, Role.Communications);
+                MMDevice targetDevice;
 
-                capture = new WasapiCapture(defaultDevice);
+                string? configuredId = FlowAI.Core.Configuration.FlowAISettings.Current.InputDeviceId;
+                if (!string.IsNullOrWhiteSpace(configuredId))
+                {
+                    try { targetDevice = deviceEnumerator.GetDevice(configuredId); }
+                    catch { targetDevice = deviceEnumerator.GetDefaultAudioEndpoint(DataFlow.Capture, Role.Communications); }
+                }
+                else
+                {
+                    targetDevice = deviceEnumerator.GetDefaultAudioEndpoint(DataFlow.Capture, Role.Communications);
+                }
+
+                capture = new WasapiCapture(targetDevice);
                 capture.DataAvailable += HandleDataAvailable;
                 capture.RecordingStopped += HandleRecordingStopped;
 
                 recordedAudioStream = new MemoryStream();
                 capture.StartRecording();
                 isRecording = true;
-                logger?.LogInformation("Started WASAPI mic recording on {DeviceName}", defaultDevice.FriendlyName);
+                logger?.LogInformation("Started WASAPI mic recording on {DeviceName}", targetDevice.FriendlyName);
             }
             catch (Exception ex)
             {

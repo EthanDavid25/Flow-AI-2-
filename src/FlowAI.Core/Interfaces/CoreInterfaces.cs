@@ -61,10 +61,14 @@ public interface IMemoryStore : IDisposable
     Task SavePreferenceAsync(UserPreference preference);
     Task<string?> GetPreferenceAsync(string key);
     Task<IReadOnlyList<UserPreference>> GetAllPreferencesAsync();
+    Task DeletePreferenceAsync(string key);
     Task SaveFactAsync(LearnedFact fact);
     Task<IReadOnlyList<LearnedFact>> SearchFactsAsync(string query);
+    Task DeleteFactAsync(long id);
     Task SaveCorrectionAsync(CorrectionRecord correction);
     Task<IReadOnlyList<CorrectionRecord>> GetCorrectionsForAppAsync(string appName);
+    Task<IReadOnlyList<CorrectionRecord>> GetAllCorrectionsAsync();
+    Task DeleteCorrectionAsync(long id);
     Task<long> SaveWorkflowAsync(LearnedWorkflow workflow);
     Task<IReadOnlyList<LearnedWorkflow>> GetWorkflowsAsync();
     Task<LearnedWorkflow?> GetWorkflowByNameAsync(string name);

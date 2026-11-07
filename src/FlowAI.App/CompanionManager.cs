@@ -42,6 +42,7 @@ public sealed class CompanionManager : IDisposable
     private readonly IAIProvider _ai;
     private readonly IMemoryStore _memory;
     private readonly ILearningEngine _learning;
+    private readonly IComputerAutomationService _automation;
     private readonly OverlayWindowManager _overlay;
 
     // ── Mutable state ─────────────────────────────────────────────────────────
@@ -52,6 +53,7 @@ public sealed class CompanionManager : IDisposable
     public event Action<FlowAIState>? StateChanged;
     public event Action<string>? TranscriptUpdated;   // user utterance
     public event Action<string>? ResponseUpdated;     // AI response text
+    public event Action<string>? ResponseStreamChunk; // AI streaming token chunk
     public event Action<string>? StatusUpdated;       // short status line
     public event Action<float>? AudioLevelChanged;    // 0.0 – 1.0
 
@@ -73,6 +75,7 @@ public sealed class CompanionManager : IDisposable
         IAIProvider ai,
         IMemoryStore memory,
         ILearningEngine learning,
+        IComputerAutomationService automation,
         OverlayWindowManager overlay)
     {
         _logger = logger;
@@ -86,6 +89,7 @@ public sealed class CompanionManager : IDisposable
         _ai = ai;
         _memory = memory;
         _learning = learning;
+        _automation = automation;
         _overlay = overlay;
 
         _stateManager.StateChanged += OnStateChanged;
@@ -218,13 +222,46 @@ public sealed class CompanionManager : IDisposable
     // ── Shared query pipeline (used by voice + text) ──────────────────────────
     private async Task RunQueryPipelineAsync(string userText, CancellationToken cancellationToken)
     {
-        // 1. Capture screen
+        string activeApp = GetForegroundAppName();
+
+        // 1. Check learned workflow first!
+        if (_settings.LearningEnabled)
+        {
+            var matchedWorkflow = await _learning.MatchWorkflowAsync(userText, activeApp);
+            if (matchedWorkflow != null && matchedWorkflow.Steps.Count > 0)
+            {
+                await ExecuteWorkflowAsync(matchedWorkflow, cancellationToken);
+                return;
+            }
+
+            // Check learned correction!
+            if (_settings.AutoRetrieveCorrections)
+            {
+                var correctedTarget = await _learning.CheckForLearnedCorrectionAsync(activeApp, userText);
+                if (correctedTarget != null)
+                {
+                    _logger.LogInformation("Applying learned correction for query '{Query}'", userText);
+                    _stateManager.TransitionTo(FlowAIState.Guiding, "Applying learned correction");
+                    StatusUpdated?.Invoke($"Found (learned): {correctedTarget.Label}");
+                    _overlay.FlyToTarget(correctedTarget);
+
+                    string msg = $"Found {correctedTarget.Label} using your previously learned correction.";
+                    ResponseUpdated?.Invoke(msg);
+                    _stateManager.TransitionTo(FlowAIState.Speaking, "Speaking correction feedback");
+                    await _tts.SpeakAsync(msg, cancellationToken);
+                    _stateManager.ResetToIdle();
+                    return;
+                }
+            }
+        }
+
+        // 2. Capture screen
         _stateManager.TransitionTo(FlowAIState.AnalysingScreen, "Query ready");
         StatusUpdated?.Invoke("Reading screen…");
 
         var screens = await _capture.CaptureAllScreensAsync(cancellationToken);
 
-        // 2. Build AI request
+        // 3. Build AI request
         _stateManager.TransitionTo(FlowAIState.Thinking, "Screen captured");
         StatusUpdated?.Invoke("Thinking…");
 
@@ -245,28 +282,47 @@ public sealed class CompanionManager : IDisposable
             MaxTokens = 1024
         };
 
-        // 3. Send to AI
-        var response = await _ai.SendChatAsync(request, cancellationToken);
+        // 4. Send to AI (with real-time streaming)
+        string fullRawResponse = string.Empty;
+        var durationWatch = System.Diagnostics.Stopwatch.StartNew();
 
-        if (!response.IsSuccess)
+        try
         {
-            _logger.LogWarning("AI error: {Error}", response.ErrorMessage);
-            _stateManager.TransitionTo(FlowAIState.Error, response.ErrorMessage);
-            StatusUpdated?.Invoke($"AI error: {response.ErrorMessage}");
-            await Task.Delay(3000, CancellationToken.None);
-            _stateManager.ResetToIdle();
-            return;
+            await foreach (var chunk in _ai.StreamChatAsync(request, cancellationToken))
+            {
+                fullRawResponse += chunk;
+                ResponseStreamChunk?.Invoke(chunk);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "StreamChatAsync fell back to SendChatAsync");
         }
 
-        // 4. Parse targets
-        var targets = PointProtocolParser.ParseTargets(response.RawText, out string cleanText);
-        response.CleanSpokenText = cleanText;
-        response.PointTargets = targets;
+        if (string.IsNullOrWhiteSpace(fullRawResponse))
+        {
+            var directResponse = await _ai.SendChatAsync(request, cancellationToken);
+            if (!directResponse.IsSuccess)
+            {
+                _logger.LogWarning("AI error: {Error}", directResponse.ErrorMessage);
+                _stateManager.TransitionTo(FlowAIState.Error, directResponse.ErrorMessage);
+                StatusUpdated?.Invoke($"AI error: {directResponse.ErrorMessage}");
+                await Task.Delay(3000, CancellationToken.None);
+                _stateManager.ResetToIdle();
+                return;
+            }
+            fullRawResponse = directResponse.RawText;
+        }
+
+        durationWatch.Stop();
+
+        // 5. Parse targets
+        var targets = PointProtocolParser.ParseTargets(fullRawResponse, out string cleanText);
 
         ResponseUpdated?.Invoke(cleanText);
         _logger.LogInformation("AI response ({N} targets): {Text}", targets.Count, cleanText);
 
-        // 5. Fly to targets
+        // 6. Fly to targets
         if (targets.Count > 0)
         {
             _stateManager.TransitionTo(FlowAIState.Guiding, "Targets found");
@@ -280,28 +336,92 @@ public sealed class CompanionManager : IDisposable
             }
         }
 
-        // 6. Speak
+        // 7. Speak
         _stateManager.TransitionTo(FlowAIState.Speaking, "Guiding complete");
         StatusUpdated?.Invoke("Speaking…");
 
         if (!string.IsNullOrWhiteSpace(cleanText))
             await _tts.SpeakAsync(cleanText, cancellationToken);
 
-        // 7. Record history
+        // 8. Record history
         if (_settings.LearningEnabled)
         {
             await _memory.RecordTaskHistoryAsync(new TaskHistoryRecord
             {
                 TaskQuery = userText,
-                ApplicationName = GetForegroundAppName(),
-                IsSuccess = response.IsSuccess,
-                ModelUsed = response.ModelUsed,
-                DurationMilliseconds = response.Duration.TotalMilliseconds
+                ApplicationName = activeApp,
+                IsSuccess = true,
+                ModelUsed = _ai.CurrentModel,
+                DurationMilliseconds = durationWatch.ElapsedMilliseconds
             });
         }
 
         _stateManager.ResetToIdle("Pipeline complete");
         StatusUpdated?.Invoke("Ready");
+    }
+
+    // ── Workflow execution loop ───────────────────────────────────────────────
+    private async Task ExecuteWorkflowAsync(LearnedWorkflow workflow, CancellationToken cancellationToken)
+    {
+        _stateManager.TransitionTo(FlowAIState.Executing, "Executing workflow");
+        string startMsg = $"Executing workflow '{workflow.Name}' ({workflow.Steps.Count} steps)…";
+        StatusUpdated?.Invoke(startMsg);
+        ResponseUpdated?.Invoke(startMsg);
+
+        for (int i = 0; i < workflow.Steps.Count; i++)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var step = workflow.Steps[i];
+
+            StatusUpdated?.Invoke($"Step {step.Sequence}/{workflow.Steps.Count}: {step.ActionType} {step.TargetDescription}");
+
+            DetectedTarget? stepTarget = null;
+            // If selector or coordinates exist, guide the cursor to the target
+            if (!string.IsNullOrWhiteSpace(step.TargetSelectorJson))
+            {
+                try
+                {
+                    using var doc = System.Text.Json.JsonDocument.Parse(step.TargetSelectorJson);
+                    if (doc.RootElement.TryGetProperty("X", out var xProp) &&
+                        doc.RootElement.TryGetProperty("Y", out var yProp))
+                    {
+                        stepTarget = new DetectedTarget(xProp.GetDouble(), yProp.GetDouble(), step.TargetDescription);
+                        _overlay.FlyToTarget(stepTarget);
+                        await Task.Delay(300, cancellationToken);
+                    }
+                }
+                catch { }
+            }
+
+            var action = new AutomationAction
+            {
+                ActionType = step.ActionType,
+                Description = $"{step.ActionType} {step.TargetDescription}",
+                Target = stepTarget,
+                Parameter = step.InputValue,
+                RiskLevel = step.RequiresConfirmation ? ActionRiskLevel.High : ActionRiskLevel.Low,
+                UserConfirmed = !step.RequiresConfirmation
+            };
+
+            var result = await _automation.ExecuteActionAsync(action, cancellationToken);
+            if (!result.Success)
+            {
+                _logger.LogWarning("Step {Seq} paused: {Msg}", step.Sequence, result.Message);
+                StatusUpdated?.Invoke($"Step {step.Sequence} paused: {result.Message}");
+                ResponseUpdated?.Invoke($"Workflow paused at step {step.Sequence}: {result.Message}");
+                _stateManager.ResetToIdle("Step paused");
+                return;
+            }
+
+            await Task.Delay(350, cancellationToken);
+        }
+
+        string finishMsg = $"Completed workflow '{workflow.Name}'.";
+        StatusUpdated?.Invoke("Ready");
+        ResponseUpdated?.Invoke(finishMsg);
+        _stateManager.TransitionTo(FlowAIState.Speaking, "Workflow finished");
+        await _tts.SpeakAsync(finishMsg, cancellationToken);
+        _stateManager.ResetToIdle("Workflow complete");
     }
 
     // ── Public text query API (from CompanionPanel text box) ─────────────────

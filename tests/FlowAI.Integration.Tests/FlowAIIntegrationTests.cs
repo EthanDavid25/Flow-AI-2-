@@ -135,6 +135,68 @@ public class FlowAIIntegrationTests
         Assert.Contains("requires user confirmation", result.Message);
     }
 
+    [Fact]
+    public async Task SqliteMemoryStore_DeletesCorrection_AndPreferences()
+    {
+        string tempDb = Path.Combine(Path.GetTempPath(), $"flowai_test_del_{Guid.NewGuid():N}.db");
+        try
+        {
+            using var store = new SqliteMemoryStore(tempDb);
+            await store.InitializeAsync();
+
+            await store.SavePreferenceAsync(new UserPreference { Key = "Pref1", Value = "Val1" });
+            var prefs = await store.GetAllPreferencesAsync();
+            Assert.Single(prefs);
+
+            await store.DeletePreferenceAsync("Pref1");
+            prefs = await store.GetAllPreferencesAsync();
+            Assert.Empty(prefs);
+
+            await store.SaveCorrectionAsync(new CorrectionRecord
+            {
+                ApplicationName = "App1",
+                UserQuery = "test query",
+                CorrectedTargetLabel = "Target"
+            });
+            var corrs = await store.GetAllCorrectionsAsync();
+            Assert.Single(corrs);
+
+            await store.DeleteCorrectionAsync(corrs[0].Id);
+            corrs = await store.GetAllCorrectionsAsync();
+            Assert.Empty(corrs);
+        }
+        finally
+        {
+            TryDeleteFile(tempDb);
+        }
+    }
+
+    [Fact]
+    public async Task SqliteMemoryStore_ClearsAllData()
+    {
+        string tempDb = Path.Combine(Path.GetTempPath(), $"flowai_test_clear_{Guid.NewGuid():N}.db");
+        try
+        {
+            using var store = new SqliteMemoryStore(tempDb);
+            await store.InitializeAsync();
+
+            await store.SavePreferenceAsync(new UserPreference { Key = "P", Value = "V" });
+            await store.SaveFactAsync(new LearnedFact { Fact = "F", Context = "C" });
+
+            await store.ClearAllDataAsync();
+
+            var prefs = await store.GetAllPreferencesAsync();
+            var facts = await store.SearchFactsAsync("");
+
+            Assert.Empty(prefs);
+            Assert.Empty(facts);
+        }
+        finally
+        {
+            TryDeleteFile(tempDb);
+        }
+    }
+
     // ── Helpers ───────────────────────────────────────────────────────────────
     private static void TryDeleteFile(string path)
     {
