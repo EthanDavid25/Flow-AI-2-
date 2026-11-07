@@ -1,0 +1,30 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\FlowAI.Core\FlowAI.Core.csproj" />
+    <ProjectReference Include="..\..\src\FlowAI.AI\FlowAI.AI.csproj" />
+    <ProjectReference Include="..\..\src\FlowAI.Vision\FlowAI.Vision.csproj" />
+    <ProjectReference Include="..\..\src\FlowAI.Audio\FlowAI.Audio.csproj" />
+    <ProjectReference Include="..\..\src\FlowAI.Cursor\FlowAI.Cursor.csproj" />
+    <ProjectReference Include="..\..\src\FlowAI.Overlay\FlowAI.Overlay.csproj" />
+    <ProjectReference Include="..\..\src\FlowAI.Memory\FlowAI.Memory.csproj" />
+    <ProjectReference Include="..\..\src\FlowAI.Automation\FlowAI.Automation.csproj" />
+    <ProjectReference Include="..\..\src\FlowAI.Learning\FlowAI.Learning.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.11.1" />
+    <PackageReference Include="xunit" Version="2.9.2" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="2.8.2" />
+  </ItemGroup>
+
+</Project>

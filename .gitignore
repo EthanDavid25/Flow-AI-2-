@@ -1,25 +1,14 @@
-# Dependencies
-node_modules/
-
-# Build outputs
-dist/
-dist-electron/
-release/
-
-# Vite cache
-.vite/
-
-# TypeScript
-*.tsbuildinfo
-
-# Editor
-.vscode/settings.json
-.idea/
-
-# OS
-.DS_Store
-Thumbs.db
-
-# Logs
+# Build & Output
+bin/
+obj/
+publish/
+*.user
+*.suo
+.vs/
+.dotnet_cli/
 *.log
-npm-debug.log*
+
+# Sensitive or temp
+*.flag
+*.mp3
+references/
