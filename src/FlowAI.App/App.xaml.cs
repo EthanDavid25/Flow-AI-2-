@@ -92,11 +92,11 @@ public partial class App : Application
             var overlayManager = _services.GetRequiredService<OverlayWindowManager>();
             overlayManager.InitializeOverlays();
 
+            // Show companion panel immediately
+            _panel.Show();
+
             // Initialise companion manager (async: AI health check, memory, transcription warm-up)
             await _manager.InitialiseAsync();
-
-            // Show companion panel
-            _panel.Show();
 
             // Show first-run welcome
             if (!FlowAISettings.Current.FirstRunCompleted)
@@ -106,6 +106,7 @@ public partial class App : Application
         }
         catch (Exception ex)
         {
+            LogCrash("OnStartup", ex);
             MessageBox.Show(
                 $"FlowAI failed to start:\n\n{ex.Message}\n\nSee logs for details.",
                 "FlowAI Startup Error", MessageBoxButton.OK, MessageBoxImage.Error);
