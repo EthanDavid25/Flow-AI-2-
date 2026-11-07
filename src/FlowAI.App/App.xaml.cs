@@ -256,21 +256,11 @@ public partial class App : Application
 
     private void ShowFirstRun()
     {
-        var result = MessageBox.Show(
-            "Welcome to FlowAI!\n\n" +
-            "• Press Ctrl+Alt+Space to start voice interaction\n" +
-            "• Ask questions about anything on your screen\n" +
-            "• FlowAI will guide your cursor to what you need\n\n" +
-            $"AI Model: {FlowAISettings.Current.OllamaModel} (local via Ollama)\n" +
-            $"STT: {FlowAISettings.Current.SttProvider}\n" +
-            $"TTS: {FlowAISettings.Current.TtsProvider}\n\n" +
-            "Make sure Ollama is running with: ollama serve\n\n" +
-            "Open Settings to configure voice, AI provider and appearance.",
-            "Welcome to FlowAI",
-            MessageBoxButton.OK, MessageBoxImage.Information);
-
         FlowAISettings.Current.FirstRunCompleted = true;
         FlowAISettings.Current.Save();
+
+        _tray?.ShowBalloon("Welcome to FlowAI",
+            $"Press Ctrl+Alt+Space to start voice interaction.\nAI Model: {FlowAISettings.Current.OllamaModel}\nRight-click the green orb in the tray for options.", 6000);
     }
 
     // ── Shutdown ──────────────────────────────────────────────────────────────
