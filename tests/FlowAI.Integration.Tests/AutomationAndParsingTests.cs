@@ -1,4 +1,5 @@
 using System.IO;
+using FlowAI.Audio.Capture;
 using FlowAI.Automation;
 using FlowAI.Automation.Engine;
 using FlowAI.Core.Models;
@@ -9,11 +10,42 @@ using Xunit;
 namespace FlowAI.Integration.Tests;
 
 /// <summary>
-/// Tests for ApplicationDiscovery, ActionJsonParser, and new automation action types.
+/// Tests for ApplicationDiscovery, ActionJsonParser, DeterministicCommandRouter,
+/// WAV audio wrapping, and WindowsAutomationEngine.
 /// </summary>
 public class AutomationAndParsingTests
 {
     // ── ActionJsonParser tests ─────────────────────────────────────────────────
+
+    [Fact]
+    public void ActionJsonParser_ParsesExactNotepadPlainJson()
+    {
+        // Exact response observed from Ollama
+        string response = "{\"action\": \"launch_app\", \"app\": \"Notepad\"}";
+
+        var actions = ActionJsonParser.ParseActions(response);
+
+        Assert.Single(actions);
+        Assert.Equal("launch_app", actions[0].ActionType);
+        Assert.Equal("Notepad", actions[0].App);
+    }
+
+    [Fact]
+    public void ActionJsonParser_ParsesGenericMarkdownJsonBlock()
+    {
+        string response = """
+            Here is the action:
+            ```json
+            {"action": "launch_app", "app": "Notepad"}
+            ```
+            """;
+
+        var actions = ActionJsonParser.ParseActions(response);
+
+        Assert.Single(actions);
+        Assert.Equal("launch_app", actions[0].ActionType);
+        Assert.Equal("Notepad", actions[0].App);
+    }
 
     [Fact]
     public void ActionJsonParser_ParsesFencedBlock_LaunchApp()
@@ -46,23 +78,34 @@ public class AutomationAndParsingTests
     }
 
     [Fact]
-    public void ActionJsonParser_ParsesMultipleActions()
+    public void ActionJsonParser_ParsesJsonArray_MultipleActions()
     {
         string response = """
-            Opening Chrome and navigating.
-            ```action
-            {"action": "launch_app", "app": "Google Chrome"}
-            ```
-            ```action
-            {"action": "press_key", "key": "Ctrl+T"}
-            ```
+            [
+              {"action": "launch_app", "app": "Google Chrome"},
+              {"action": "press_key", "key": "Ctrl+T"}
+            ]
             """;
 
         var actions = ActionJsonParser.ParseActions(response);
+
         Assert.Equal(2, actions.Count);
         Assert.Equal("launch_app", actions[0].ActionType);
+        Assert.Equal("Google Chrome", actions[0].App);
         Assert.Equal("press_key", actions[1].ActionType);
         Assert.Equal("Ctrl+T", actions[1].Key);
+    }
+
+    [Fact]
+    public void ActionJsonParser_ParsesEmbeddedJsonInText()
+    {
+        string response = "I am ready to help. {\"action\": \"launch_app\", \"app\": \"Calculator\"} Please wait.";
+
+        var actions = ActionJsonParser.ParseActions(response);
+
+        Assert.Single(actions);
+        Assert.Equal("launch_app", actions[0].ActionType);
+        Assert.Equal("Calculator", actions[0].App);
     }
 
     [Fact]
@@ -74,7 +117,20 @@ public class AutomationAndParsingTests
     }
 
     [Fact]
-    public void ActionJsonParser_StripActionBlocks_RemovesFromText()
+    public void ActionJsonParser_StripActionBlocks_GeneratesNaturalConfirmation_WhenOnlyJson()
+    {
+        string response = "{\"action\": \"launch_app\", \"app\": \"Notepad\"}";
+        var actions = ActionJsonParser.ParseActions(response);
+
+        string cleanText = ActionJsonParser.StripActionBlocks(response, actions);
+
+        Assert.DoesNotContain("{", cleanText);
+        Assert.DoesNotContain("action", cleanText);
+        Assert.Equal("Opening Notepad...", cleanText);
+    }
+
+    [Fact]
+    public void ActionJsonParser_StripActionBlocks_PreservesSurroundingConversation()
     {
         string response = """
             Opening Notepad.
@@ -120,6 +176,88 @@ public class AutomationAndParsingTests
         Assert.Equal("120", scrollUp.GetParameter());
     }
 
+    // ── DeterministicCommandRouter tests ───────────────────────────────────────
+
+    [Theory]
+    [InlineData("Open Notepad", "notepad")]
+    [InlineData("open notepad.", "notepad")]
+    [InlineData("launch Notepad", "notepad")]
+    [InlineData("FlowAI, please open Notepad", "notepad")]
+    [InlineData("Start Chrome", "chrome")]
+    [InlineData("Open Calculator", "calculator")]
+    [InlineData("Open File Explorer", "file explorer")]
+    public void DeterministicCommandRouter_RoutesBasicOpenCommands(string query, string expectedApp)
+    {
+        var plan = DeterministicCommandRouter.TryRoute(query);
+
+        Assert.NotNull(plan);
+        Assert.True(plan.IsMatched);
+        Assert.Single(plan.Actions);
+        Assert.Equal("launchapplication", plan.Actions[0].ActionType);
+        Assert.Equal(expectedApp, plan.Actions[0].Parameter, ignoreCase: true);
+        Assert.Contains(expectedApp, plan.SpokenConfirmation, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void DeterministicCommandRouter_RoutesSwitchCommand()
+    {
+        var plan = DeterministicCommandRouter.TryRoute("Switch to Notepad");
+
+        Assert.NotNull(plan);
+        Assert.True(plan.IsMatched);
+        Assert.Single(plan.Actions);
+        Assert.Equal("switchwindow", plan.Actions[0].ActionType);
+        Assert.Equal("notepad", plan.Actions[0].Parameter, ignoreCase: true);
+    }
+
+    [Fact]
+    public void DeterministicCommandRouter_RoutesCloseCommand()
+    {
+        var plan = DeterministicCommandRouter.TryRoute("Close Chrome");
+
+        Assert.NotNull(plan);
+        Assert.True(plan.IsMatched);
+        Assert.Single(plan.Actions);
+        Assert.Equal("closewindow", plan.Actions[0].ActionType);
+        Assert.Equal("chrome", plan.Actions[0].Parameter, ignoreCase: true);
+    }
+
+    [Fact]
+    public void DeterministicCommandRouter_RoutesComposite_OpenAndType()
+    {
+        var plan = DeterministicCommandRouter.TryRoute("Open Notepad and type Hello from FlowAI");
+
+        Assert.NotNull(plan);
+        Assert.True(plan.IsMatched);
+        Assert.Equal(2, plan.Actions.Count);
+        Assert.Equal("launchapplication", plan.Actions[0].ActionType);
+        Assert.Equal("notepad", plan.Actions[0].Parameter, ignoreCase: true);
+        Assert.Equal("typetext", plan.Actions[1].ActionType);
+        Assert.Equal("Hello from FlowAI", plan.Actions[1].Parameter);
+    }
+
+    [Fact]
+    public void DeterministicCommandRouter_RoutesComposite_ChromeSearch()
+    {
+        var plan = DeterministicCommandRouter.TryRoute("Open Chrome and search for artificial intelligence");
+
+        Assert.NotNull(plan);
+        Assert.True(plan.IsMatched);
+        Assert.Equal(4, plan.Actions.Count);
+        Assert.Equal("launchapplication", plan.Actions[0].ActionType);
+        Assert.Equal("shortcut", plan.Actions[1].ActionType); // Ctrl+L
+        Assert.Equal("typetext", plan.Actions[2].ActionType);
+        Assert.Equal("artificial intelligence", plan.Actions[2].Parameter);
+        Assert.Equal("shortcut", plan.Actions[3].ActionType); // Enter
+    }
+
+    [Fact]
+    public void DeterministicCommandRouter_ReturnsNull_ForOpenEndedQuestion()
+    {
+        var plan = DeterministicCommandRouter.TryRoute("Where is the save button on the screen?");
+        Assert.Null(plan);
+    }
+
     // ── ApplicationDiscovery tests ─────────────────────────────────────────────
 
     [Fact]
@@ -161,7 +299,6 @@ public class AutomationAndParsingTests
     [Fact]
     public void ApplicationDiscovery_FindsChrome_WhenInstalled()
     {
-        // This test is conditional — Chrome may not be installed in every environment
         var discovery = new ApplicationDiscovery();
         string? path = discovery.FindApplication("chrome");
 
@@ -169,23 +306,46 @@ public class AutomationAndParsingTests
         {
             Assert.True(File.Exists(path), $"Chrome path does not exist: {path}");
         }
-        // Test passes even if Chrome is not found (it may not be installed)
     }
 
+    // ── WAV audio wrapping test (Whisper fix) ──────────────────────────────────
+
     [Fact]
-    public void ApplicationDiscovery_FindRunningProcess_ReturnsNullForNonRunningApp()
+    public void WasapiAudioRecorder_WrapInWavHeader_GeneratesValidRiffHeader()
     {
-        var proc = ApplicationDiscovery.FindRunningProcess("xyzFakeApp99999");
-        Assert.Null(proc);
+        byte[] dummyPcm = new byte[3200]; // 100ms of 16kHz 16-bit mono audio
+        for (int i = 0; i < dummyPcm.Length; i++) dummyPcm[i] = (byte)(i % 256);
+
+        byte[] wavBytes = WasapiAudioRecorder.WrapInWavHeader(dummyPcm, 16000, 1, 16);
+
+        Assert.Equal(dummyPcm.Length + 44, wavBytes.Length);
+        // "RIFF"
+        Assert.Equal((byte)'R', wavBytes[0]);
+        Assert.Equal((byte)'I', wavBytes[1]);
+        Assert.Equal((byte)'F', wavBytes[2]);
+        Assert.Equal((byte)'F', wavBytes[3]);
+        // "WAVE"
+        Assert.Equal((byte)'W', wavBytes[8]);
+        Assert.Equal((byte)'A', wavBytes[9]);
+        Assert.Equal((byte)'V', wavBytes[10]);
+        Assert.Equal((byte)'E', wavBytes[11]);
+        // "fmt "
+        Assert.Equal((byte)'f', wavBytes[12]);
+        Assert.Equal((byte)'m', wavBytes[13]);
+        Assert.Equal((byte)'t', wavBytes[14]);
+        Assert.Equal((byte)' ', wavBytes[15]);
+        // "data"
+        Assert.Equal((byte)'d', wavBytes[36]);
+        Assert.Equal((byte)'a', wavBytes[37]);
+        Assert.Equal((byte)'t', wavBytes[38]);
+        Assert.Equal((byte)'a', wavBytes[39]);
     }
 
     // ── WindowsAutomationEngine new actions tests ──────────────────────────────
 
     [Fact]
-    public async Task WindowsAutomationEngine_RejectsUnsupportedAction_GracefullyBeforeNewActions()
+    public async Task WindowsAutomationEngine_RejectsUnsupportedAction_Gracefully()
     {
-        // This was the existing behavior — now we have new supported actions
-        // but still reject truly unknown actions
         var uiDiscovery = new UIAutomationDiscoveryService();
         var engine = new WindowsAutomationEngine(uiDiscovery);
 
@@ -200,36 +360,5 @@ public class AutomationAndParsingTests
         var result = await engine.ExecuteActionAsync(unknownAction);
         Assert.False(result.Success);
         Assert.Contains("Unsupported action type", result.Message);
-    }
-
-    [Fact]
-    public async Task WindowsAutomationEngine_LaunchApplicationAction_IsRecognized()
-    {
-        // Test that "launchapplication" action type is handled (not returned as unsupported)
-        // We don't test actual launch (would open windows during test) — just verify routing
-        var uiDiscovery = new UIAutomationDiscoveryService();
-        var appDiscovery = new ApplicationDiscovery();
-        var engine = new WindowsAutomationEngine(uiDiscovery, appDiscovery);
-
-        var launchAction = new AutomationAction
-        {
-            ActionType = "launchapplication",
-            Description = "Open Notepad",
-            Parameter = "notepad",          // notepad is always available
-            RiskLevel = ActionRiskLevel.Low,
-            UserConfirmed = true
-        };
-
-        // This actually launches Notepad — close it immediately after
-        var result = await engine.ExecuteActionAsync(launchAction);
-        Assert.True(result.Success, $"Launch failed: {result.Message}");
-
-        // Clean up: close any notepad that was opened
-        await Task.Delay(1500); // wait for Notepad to open
-        var notepadProcs = System.Diagnostics.Process.GetProcessesByName("notepad");
-        foreach (var p in notepadProcs)
-        {
-            try { p.CloseMainWindow(); } catch { }
-        }
     }
 }

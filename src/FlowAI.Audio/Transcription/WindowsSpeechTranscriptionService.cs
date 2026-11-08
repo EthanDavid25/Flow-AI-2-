@@ -36,7 +36,14 @@ public sealed class WindowsSpeechTranscriptionService : ITranscriptionService
                 using var engine = new SpeechRecognitionEngine();
                 engine.LoadGrammar(new DictationGrammar());
 
-                using var stream = new MemoryStream(pcm16Audio);
+                int offset = 0;
+                if (pcm16Audio.Length >= 44 &&
+                    pcm16Audio[0] == 0x52 && pcm16Audio[1] == 0x49 && pcm16Audio[2] == 0x46 && pcm16Audio[3] == 0x46)
+                {
+                    offset = 44; // Skip RIFF/WAVE header for SAPI raw audio stream
+                }
+
+                using var stream = new MemoryStream(pcm16Audio, offset, pcm16Audio.Length - offset);
                 engine.SetInputToAudioStream(
                     stream,
                     new System.Speech.AudioFormat.SpeechAudioFormatInfo(16000, System.Speech.AudioFormat.AudioBitsPerSample.Sixteen, System.Speech.AudioFormat.AudioChannel.Mono));

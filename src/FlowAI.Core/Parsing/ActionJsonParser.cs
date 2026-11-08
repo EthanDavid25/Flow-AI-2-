@@ -5,45 +5,88 @@ namespace FlowAI.Core.Parsing;
 
 /// <summary>
 /// Parses structured action JSON blocks from AI responses.
+/// Supports:
+/// - Fenced blocks (```action, ```json, or untagged ```)
+/// - Inline tags ([ACTION:{...}])
+/// - Raw JSON objects ({"action": ...})
+/// - JSON arrays ([{"action": ...}, ...])
+/// - Embedded JSON within conversational text
 ///
-/// The AI embeds action intents in its response in one of two forms:
-///
-///   Fenced block (preferred):
-///     ```action
-///     {"action": "launch_app", "app": "Google Chrome"}
-///     ```
-///
-///   Inline tag (compact):
-///     [ACTION:{"action":"type_text","text":"Hello World"}]
-///
-/// These are stripped from the spoken text so the user hears only the natural-language part.
+/// Strips action blocks so raw JSON is never shown in chat or spoken aloud.
 /// </summary>
 public static class ActionJsonParser
 {
-    // Matches ```action ... ``` code fences
-    private static readonly Regex FencedActionBlock = new(
-        @"```action\s*\r?\n([\s\S]*?)\r?\n?\s*```",
+    // Matches ```action ... ```, ```json ... ```, or plain ``` ... ``` containing "action"
+    private static readonly Regex FencedBlockRegex = new(
+        @"```(?:action|json)?\s*\r?\n([\s\S]*?)\r?\n?\s*```",
         RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
     // Matches [ACTION:{...}] inline tags
-    private static readonly Regex InlineActionTag = new(
+    private static readonly Regex InlineActionRegex = new(
         @"\[ACTION:([\s\S]*?)\]",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+    // Matches raw JSON objects containing an "action" key
+    private static readonly Regex EmbeddedJsonRegex = new(
+        @"\{[^{}]*""action""\s*:[^{}]*\}",
         RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
     /// <summary>Extracts all action blocks from an AI response text.</summary>
     public static List<ParsedAction> ParseActions(string text)
     {
         var actions = new List<ParsedAction>();
+        if (string.IsNullOrWhiteSpace(text)) return actions;
 
-        foreach (Match m in FencedActionBlock.Matches(text))
+        string trimmed = text.Trim();
+
+        // 1. Try parsing whole trimmed text as JSON array first: [{"action": ...}]
+        if (trimmed.StartsWith("[") && trimmed.EndsWith("]"))
+        {
+            var arrayActions = TryParseJsonArray(trimmed);
+            if (arrayActions.Count > 0) return arrayActions;
+        }
+
+        // 2. Try parsing whole trimmed text as single JSON object: {"action": ...}
+        if (trimmed.StartsWith("{") && trimmed.EndsWith("}"))
+        {
+            var single = TryParseJson(trimmed);
+            if (single != null)
+            {
+                actions.Add(single);
+                return actions;
+            }
+        }
+
+        // 3. Parse fenced blocks
+        foreach (Match m in FencedBlockRegex.Matches(text))
+        {
+            string content = m.Groups[1].Value.Trim();
+            if (content.StartsWith("["))
+            {
+                actions.AddRange(TryParseJsonArray(content));
+            }
+            else
+            {
+                var action = TryParseJson(content);
+                if (action != null) actions.Add(action);
+            }
+        }
+
+        if (actions.Count > 0) return actions;
+
+        // 4. Parse inline tags [ACTION:...]
+        foreach (Match m in InlineActionRegex.Matches(text))
         {
             var action = TryParseJson(m.Groups[1].Value.Trim());
             if (action != null) actions.Add(action);
         }
 
-        foreach (Match m in InlineActionTag.Matches(text))
+        if (actions.Count > 0) return actions;
+
+        // 5. Look for embedded JSON objects { ... "action": ... }
+        foreach (Match m in EmbeddedJsonRegex.Matches(text))
         {
-            var action = TryParseJson(m.Groups[1].Value.Trim());
+            var action = TryParseJson(m.Value.Trim());
             if (action != null) actions.Add(action);
         }
 
@@ -51,16 +94,75 @@ public static class ActionJsonParser
     }
 
     /// <summary>
-    /// Removes action blocks/tags from the response so they are not read aloud.
-    /// Call after ParseActions to get the clean spoken text.
+    /// Removes action blocks/tags from the response so they are not read aloud or shown in chat.
+    /// If the message consisted entirely of action blocks, returns a natural spoken acknowledgment.
     /// </summary>
-    public static string StripActionBlocks(string text)
+    public static string StripActionBlocks(string text, IReadOnlyList<ParsedAction>? parsedActions = null)
     {
-        text = FencedActionBlock.Replace(text, string.Empty);
-        text = InlineActionTag.Replace(text, string.Empty);
+        if (string.IsNullOrWhiteSpace(text)) return string.Empty;
+
+        string cleaned = FencedBlockRegex.Replace(text, string.Empty);
+        cleaned = InlineActionRegex.Replace(cleaned, string.Empty);
+
+        // If the remaining string is a raw JSON object or array, remove it
+        string trimmed = cleaned.Trim();
+        if ((trimmed.StartsWith("{") && trimmed.EndsWith("}")) ||
+            (trimmed.StartsWith("[") && trimmed.EndsWith("]")))
+        {
+            cleaned = string.Empty;
+        }
+        else
+        {
+            cleaned = EmbeddedJsonRegex.Replace(cleaned, string.Empty);
+        }
+
         // Collapse multiple blank lines left behind
-        text = Regex.Replace(text, @"\n{3,}", "\n\n");
-        return text.Trim();
+        cleaned = Regex.Replace(cleaned, @"\n{3,}", "\n\n").Trim();
+
+        // If nothing remains except whitespace or punctuation, provide a clean natural message
+        if (string.IsNullOrWhiteSpace(cleaned) && parsedActions != null && parsedActions.Count > 0)
+        {
+            var first = parsedActions[0];
+            return GenerateNaturalConfirmation(first);
+        }
+
+        return cleaned;
+    }
+
+    public static string GenerateNaturalConfirmation(ParsedAction action)
+    {
+        string app = action.App ?? action.Target ?? "the application";
+        return action.ActionType.ToLowerInvariant() switch
+        {
+            "launch_app" or "open_app" or "open" or "launch" => $"Opening {app}...",
+            "switch_window" or "switch_app" or "focus_app"   => $"Switching to {app}...",
+            "close_window" or "close_app"                   => $"Closing {app}...",
+            "maximize"                                       => $"Maximizing {app}...",
+            "minimize"                                       => $"Minimizing {app}...",
+            "type_text" or "type" or "input"                => $"Typing text...",
+            "press_key" or "key" or "shortcut"               => $"Pressing {action.Key}...",
+            "click" or "left_click"                          => $"Clicking {action.Target ?? "target"}...",
+            _                                                => $"Executing {action.ActionType}..."
+        };
+    }
+
+    private static List<ParsedAction> TryParseJsonArray(string json)
+    {
+        var list = new List<ParsedAction>();
+        try
+        {
+            using var doc = JsonDocument.Parse(json);
+            if (doc.RootElement.ValueKind == JsonValueKind.Array)
+            {
+                foreach (var el in doc.RootElement.EnumerateArray())
+                {
+                    var a = ParseElement(el);
+                    if (a != null) list.Add(a);
+                }
+            }
+        }
+        catch { }
+        return list;
     }
 
     private static ParsedAction? TryParseJson(string json)
@@ -68,29 +170,48 @@ public static class ActionJsonParser
         try
         {
             using var doc = JsonDocument.Parse(json);
-            var root = doc.RootElement;
-
-            if (!root.TryGetProperty("action", out var actionProp)) return null;
-            string actionType = actionProp.GetString() ?? string.Empty;
-            if (string.IsNullOrEmpty(actionType)) return null;
-
-            var parsed = new ParsedAction { ActionType = actionType };
-
-            if (root.TryGetProperty("app", out var app))    parsed.App    = app.GetString();
-            if (root.TryGetProperty("text", out var text))  parsed.Text   = text.GetString();
-            if (root.TryGetProperty("key", out var key))    parsed.Key    = key.GetString();
-            if (root.TryGetProperty("url", out var url))    parsed.Url    = url.GetString();
-            if (root.TryGetProperty("target", out var tgt)) parsed.Target = tgt.GetString();
-            if (root.TryGetProperty("query", out var qry))  parsed.Query  = qry.GetString();
-            if (root.TryGetProperty("amount", out var amt) && amt.TryGetInt32(out int amtVal))
-                parsed.Amount = amtVal;
-
-            return parsed;
+            return ParseElement(doc.RootElement);
         }
         catch
         {
             return null;
         }
+    }
+
+    private static ParsedAction? ParseElement(JsonElement root)
+    {
+        if (root.ValueKind != JsonValueKind.Object) return null;
+
+        // Find action property (case-insensitive)
+        string actionType = string.Empty;
+        foreach (var prop in root.EnumerateObject())
+        {
+            if (prop.Name.Equals("action", StringComparison.OrdinalIgnoreCase) ||
+                prop.Name.Equals("action_type", StringComparison.OrdinalIgnoreCase) ||
+                prop.Name.Equals("type", StringComparison.OrdinalIgnoreCase))
+            {
+                actionType = prop.Value.GetString() ?? string.Empty;
+                break;
+            }
+        }
+
+        if (string.IsNullOrEmpty(actionType)) return null;
+
+        var parsed = new ParsedAction { ActionType = actionType };
+
+        foreach (var prop in root.EnumerateObject())
+        {
+            string name = prop.Name.ToLowerInvariant();
+            if (name is "app" or "application" or "app_name") parsed.App = prop.Value.GetString();
+            else if (name is "text" or "input" or "value") parsed.Text = prop.Value.GetString();
+            else if (name is "key" or "shortcut" or "keys") parsed.Key = prop.Value.GetString();
+            else if (name is "url" or "uri" or "link") parsed.Url = prop.Value.GetString();
+            else if (name is "target" or "target_name" or "element") parsed.Target = prop.Value.GetString();
+            else if (name is "query" or "search") parsed.Query = prop.Value.GetString();
+            else if (name is "amount" && prop.Value.TryGetInt32(out int amtVal)) parsed.Amount = amtVal;
+        }
+
+        return parsed;
     }
 }
 

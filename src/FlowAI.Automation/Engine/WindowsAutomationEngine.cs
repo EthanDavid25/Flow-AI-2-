@@ -50,7 +50,7 @@ public sealed class WindowsAutomationEngine : IComputerAutomationService
             switch (action.ActionType.ToLowerInvariant())
             {
                 case "movecursor":
-                    ExecuteMoveCursor(action);
+                    await ExecuteMoveCursorAsync(action, cancellationToken);
                     break;
                 case "click":
                 case "leftclick":
@@ -137,6 +137,13 @@ public sealed class WindowsAutomationEngine : IComputerAutomationService
         // Give the UI 150ms to settle
         Thread.Sleep(150);
 
+        if (action.ActionType.Equals("launchapplication", StringComparison.OrdinalIgnoreCase))
+        {
+            string app = action.Parameter ?? action.Description;
+            var proc = ApplicationDiscovery.FindRunningProcess(app);
+            return Task.FromResult(proc != null);
+        }
+
         if (action.Target != null)
         {
             // Revalidate that target was affected or still responsive
@@ -147,13 +154,47 @@ public sealed class WindowsAutomationEngine : IComputerAutomationService
         return Task.FromResult(true);
     }
 
-    private static void ExecuteMoveCursor(AutomationAction action)
+    public static async Task MoveCursorSmoothlyAsync(int targetX, int targetY, int durationMs = 250, CancellationToken ct = default)
+    {
+        AutomationNativeMethods.GetCursorPos(out var start);
+        if (start.X == targetX && start.Y == targetY) return;
+
+        int steps = Math.Clamp(durationMs / 12, 12, 28);
+        double distance = Math.Sqrt(Math.Pow(targetX - start.X, 2) + Math.Pow(targetY - start.Y, 2));
+
+        double midX = (start.X + targetX) / 2.0;
+        double midY = (start.Y + targetY) / 2.0;
+        double arc = Math.Min(distance * 0.15, 50.0);
+        double ctrlX = midX;
+        double ctrlY = midY - arc;
+
+        for (int i = 1; i <= steps; i++)
+        {
+            ct.ThrowIfCancellationRequested();
+            double linearProgress = (double)i / steps;
+            double t = linearProgress * linearProgress * (3.0 - 2.0 * linearProgress);
+            double oneMinusT = 1.0 - t;
+
+            double x = (oneMinusT * oneMinusT * start.X)
+                       + (2.0 * oneMinusT * t * ctrlX)
+                       + (t * t * targetX);
+            double y = (oneMinusT * oneMinusT * start.Y)
+                       + (2.0 * oneMinusT * t * ctrlY)
+                       + (t * t * targetY);
+
+            AutomationNativeMethods.SetCursorPos((int)Math.Round(x), (int)Math.Round(y));
+            await Task.Delay(10, ct);
+        }
+        AutomationNativeMethods.SetCursorPos(targetX, targetY);
+    }
+
+    private static async Task ExecuteMoveCursorAsync(AutomationAction action, CancellationToken ct)
     {
         if (action.Target != null)
         {
             int targetX = (int)Math.Round(action.Target.TargetPoint.X);
             int targetY = (int)Math.Round(action.Target.TargetPoint.Y);
-            AutomationNativeMethods.SetCursorPos(targetX, targetY);
+            await MoveCursorSmoothlyAsync(targetX, targetY, 250, ct);
         }
     }
 
@@ -163,13 +204,20 @@ public sealed class WindowsAutomationEngine : IComputerAutomationService
         {
             int x = (int)Math.Round(action.Target.TargetPoint.X);
             int y = (int)Math.Round(action.Target.TargetPoint.Y);
-            AutomationNativeMethods.SetCursorPos(x, y);
+            await MoveCursorSmoothlyAsync(x, y, 220, ct);
             await Task.Delay(40, ct);
 
             // Left click down and up
             AutomationNativeMethods.mouse_event(AutomationNativeMethods.MOUSEEVENTF_LEFTDOWN, x, y, 0, UIntPtr.Zero);
-            await Task.Delay(30, ct);
+            await Task.Delay(35, ct);
             AutomationNativeMethods.mouse_event(AutomationNativeMethods.MOUSEEVENTF_LEFTUP, x, y, 0, UIntPtr.Zero);
+        }
+        else
+        {
+            AutomationNativeMethods.GetCursorPos(out var pt);
+            AutomationNativeMethods.mouse_event(AutomationNativeMethods.MOUSEEVENTF_LEFTDOWN, pt.X, pt.Y, 0, UIntPtr.Zero);
+            await Task.Delay(35, ct);
+            AutomationNativeMethods.mouse_event(AutomationNativeMethods.MOUSEEVENTF_LEFTUP, pt.X, pt.Y, 0, UIntPtr.Zero);
         }
     }
 
@@ -204,6 +252,26 @@ public sealed class WindowsAutomationEngine : IComputerAutomationService
         {
             AutomationNativeMethods.keybd_event(0x1B, 0, 0, UIntPtr.Zero);
             AutomationNativeMethods.keybd_event(0x1B, 0, AutomationNativeMethods.KEYEVENTF_KEYUP, UIntPtr.Zero);
+        }
+        else if (shortcut.Equals("Tab", StringComparison.OrdinalIgnoreCase))
+        {
+            AutomationNativeMethods.keybd_event(0x09, 0, 0, UIntPtr.Zero);
+            AutomationNativeMethods.keybd_event(0x09, 0, AutomationNativeMethods.KEYEVENTF_KEYUP, UIntPtr.Zero);
+        }
+        else if (shortcut.Equals("Ctrl+L", StringComparison.OrdinalIgnoreCase))
+        {
+            // Ctrl down, L down, L up, Ctrl up
+            AutomationNativeMethods.keybd_event(0x11, 0, 0, UIntPtr.Zero);
+            AutomationNativeMethods.keybd_event(0x4C, 0, 0, UIntPtr.Zero);
+            AutomationNativeMethods.keybd_event(0x4C, 0, AutomationNativeMethods.KEYEVENTF_KEYUP, UIntPtr.Zero);
+            AutomationNativeMethods.keybd_event(0x11, 0, AutomationNativeMethods.KEYEVENTF_KEYUP, UIntPtr.Zero);
+        }
+        else if (shortcut.Equals("Ctrl+T", StringComparison.OrdinalIgnoreCase))
+        {
+            AutomationNativeMethods.keybd_event(0x11, 0, 0, UIntPtr.Zero);
+            AutomationNativeMethods.keybd_event(0x54, 0, 0, UIntPtr.Zero);
+            AutomationNativeMethods.keybd_event(0x54, 0, AutomationNativeMethods.KEYEVENTF_KEYUP, UIntPtr.Zero);
+            AutomationNativeMethods.keybd_event(0x11, 0, AutomationNativeMethods.KEYEVENTF_KEYUP, UIntPtr.Zero);
         }
     }
 

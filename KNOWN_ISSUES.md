@@ -50,6 +50,10 @@
 - **KI-007** — Voice PCM conversion returned raw audio on failure (Whisper hallucination) → Fixed in `838c2f0`
 - **KI-008** — EdgeTtsService swallowed exceptions, blocking Windows Speech fallback → Fixed in `838c2f0`
 - **KI-009** — WindowsAutomationEngine had no `launchapplication` action type → Fixed in `838c2f0`
+- **KI-010** — Action JSON displayed in chat instead of executing when provider outputted plain JSON → Fixed via robust `ActionJsonParser` + real-time streaming JSON suppression
+- **KI-011** — Whisper.net failed silently on raw PCM missing 44-byte WAV header → Fixed via `WrapInWavHeader` + seamless Windows Speech fallback
+- **KI-012** — Green cursor animated on overlay without moving real Windows pointer → Fixed via synchronised `MoveCursorSmoothlyAsync` (Bézier + smoothstep)
+- **KI-013** — Unnecessary cloud & local LLM delays on unambiguous commands (e.g. "Open Notepad") → Fixed via `DeterministicCommandRouter` (instant 0ms LLM fast-path)
 
 ---
 

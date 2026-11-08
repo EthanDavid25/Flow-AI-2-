@@ -3,6 +3,7 @@ using FlowAI.AI.Providers;
 using FlowAI.Audio.Capture;
 using FlowAI.Audio.Transcription;
 using FlowAI.Audio.Tts;
+using FlowAI.Automation;
 using FlowAI.Automation.Engine;
 using FlowAI.Core.Configuration;
 using FlowAI.Core.Enums;
@@ -261,6 +262,14 @@ public sealed class CompanionManager : IDisposable
             }
         }
 
+        // 1b. Deterministic Local Command Routing (no LLM, no screen capture, instant execution)
+        var localPlan = DeterministicCommandRouter.TryRoute(userText);
+        if (localPlan != null && localPlan.IsMatched)
+        {
+            await ExecuteDeterministicPlanAsync(localPlan, cancellationToken);
+            return;
+        }
+
         // 2. Capture screen (skip for simple open/close/launch commands to save time)
         bool needsScreen = !IsScreenFreeCommand(userText);
         IReadOnlyList<CapturedScreen> screens;
@@ -307,13 +316,25 @@ public sealed class CompanionManager : IDisposable
 
         string fullRawResponse = string.Empty;
         var durationWatch = System.Diagnostics.Stopwatch.StartNew();
+        bool isJsonStreamDetected = false;
 
         try
         {
             await foreach (var chunk in provider.StreamChatAsync(request, cancellationToken))
             {
                 fullRawResponse += chunk;
-                ResponseStreamChunk?.Invoke(chunk);
+                if (!isJsonStreamDetected && (fullRawResponse.TrimStart().StartsWith("{") ||
+                                              fullRawResponse.TrimStart().StartsWith("```action") ||
+                                              fullRawResponse.TrimStart().StartsWith("```json") ||
+                                              fullRawResponse.TrimStart().StartsWith("[")))
+                {
+                    isJsonStreamDetected = true;
+                }
+
+                if (!isJsonStreamDetected)
+                {
+                    ResponseStreamChunk?.Invoke(chunk);
+                }
             }
         }
         catch (Exception ex)
@@ -329,9 +350,10 @@ public sealed class CompanionManager : IDisposable
                 // In AUTO mode: If cloud fails, seamlessly retry with local Ollama!
                 if (!provider.IsLocal && _settings.OperatingMode.Equals("Auto", StringComparison.OrdinalIgnoreCase))
                 {
-                    _logger.LogWarning("Cloud provider {Provider} failed: {Err} — seamlessly falling back to local Ollama",
-                        provider.ProviderName, directResponse.ErrorMessage);
-                    StatusUpdated?.Invoke($"Cloud offline — falling back to local Ollama…");
+                    string safeErr = directResponse.ErrorMessage ?? "Connection failed";
+                    _logger.LogWarning("Cloud provider {Provider} unavailable ({Err}) — switched to local inference",
+                        provider.ProviderName, safeErr);
+                    StatusUpdated?.Invoke($"Cloud offline — switched to local {ActiveAI.CurrentModel}…");
 
                     var localProv = _aiFactory.LocalProvider;
                     var localResponse = await localProv.SendChatAsync(request, cancellationToken);
@@ -373,7 +395,7 @@ public sealed class CompanionManager : IDisposable
 
         // 5b. Parse and execute structured action blocks (launch_app, type_text, etc.)
         var parsedActions = ActionJsonParser.ParseActions(fullRawResponse);
-        cleanText = ActionJsonParser.StripActionBlocks(cleanText);
+        cleanText = ActionJsonParser.StripActionBlocks(cleanText, parsedActions);
 
         if (parsedActions.Count > 0)
         {
@@ -386,6 +408,7 @@ public sealed class CompanionManager : IDisposable
                     ActionType  = parsedAction.ToAutomationActionType(),
                     Description = $"{parsedAction.ActionType} {parsedAction.App ?? parsedAction.Text ?? string.Empty}",
                     Parameter   = parsedAction.GetParameter(),
+                    Target      = targets.FirstOrDefault(),
                     RiskLevel   = GetRiskLevel(parsedAction.ActionType),
                     UserConfirmed = true  // AI-initiated actions are pre-approved
                 };
@@ -403,7 +426,7 @@ public sealed class CompanionManager : IDisposable
         _logger.LogInformation("AI response ({N} targets, {A} actions): {Text}",
             targets.Count, parsedActions.Count, cleanText);
 
-        // 6. Fly to targets
+        // 6. Fly to targets with synchronised real pointer movement
         if (targets.Count > 0)
         {
             _stateManager.TransitionTo(FlowAIState.Guiding, "Targets found");
@@ -413,6 +436,12 @@ public sealed class CompanionManager : IDisposable
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 _overlay.FlyToTarget(target);
+                // Synchronously glide the actual Windows pointer to the exact target point
+                await WindowsAutomationEngine.MoveCursorSmoothlyAsync(
+                    (int)Math.Round(target.TargetPoint.X),
+                    (int)Math.Round(target.TargetPoint.Y),
+                    300,
+                    cancellationToken);
                 await Task.Delay(300, cancellationToken);
             }
         }
@@ -456,6 +485,51 @@ public sealed class CompanionManager : IDisposable
 
         _stateManager.ResetToIdle("Pipeline complete");
         StatusUpdated?.Invoke("Ready");
+    }
+
+    // ── Deterministic command execution loop ──────────────────────────────────
+    private async Task ExecuteDeterministicPlanAsync(DeterministicCommandRouter.DeterministicPlan plan, CancellationToken cancellationToken)
+    {
+        _logger.LogInformation("Executing deterministic plan: {Desc}", plan.Description);
+        _stateManager.TransitionTo(FlowAIState.Executing, "Executing local command");
+        StatusUpdated?.Invoke(plan.UserFacingMessage);
+        ResponseUpdated?.Invoke(plan.UserFacingMessage);
+
+        foreach (var action in plan.Actions)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var result = await _automation.ExecuteActionAsync(action, cancellationToken);
+            if (!result.Success)
+            {
+                _logger.LogWarning("Action {Action} failed: {Msg}", action.ActionType, result.Message);
+            }
+            await Task.Delay(200, cancellationToken);
+        }
+
+        // Voice confirmation
+        _stateManager.TransitionTo(FlowAIState.Speaking, "Speaking confirmation");
+        StatusUpdated?.Invoke("Ready");
+        string confirmation = plan.SpokenConfirmation;
+        ResponseUpdated?.Invoke(confirmation);
+
+        if (_settings.OperatingMode.Equals("Offline", StringComparison.OrdinalIgnoreCase))
+        {
+            await _offlineTts.SpeakAsync(confirmation, cancellationToken);
+        }
+        else
+        {
+            try
+            {
+                await _tts.SpeakAsync(confirmation, cancellationToken);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Primary TTS failed; falling back to offline Windows Speech");
+                await _offlineTts.SpeakAsync(confirmation, cancellationToken);
+            }
+        }
+
+        _stateManager.ResetToIdle("Local command complete");
     }
 
     // ── Workflow execution loop ───────────────────────────────────────────────

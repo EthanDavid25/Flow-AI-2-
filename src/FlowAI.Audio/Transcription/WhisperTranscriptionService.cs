@@ -93,12 +93,28 @@ public sealed class WhisperTranscriptionService : ITranscriptionService
 
             string fullTranscript = string.Join(" ", recognizedSegments).Trim();
             logger?.LogInformation("Whisper transcribed: '{Transcript}'", fullTranscript);
+
+            if (string.IsNullOrWhiteSpace(fullTranscript))
+            {
+                logger?.LogInformation("Whisper returned empty, attempting Windows Speech fallback...");
+                var fallback = new WindowsSpeechTranscriptionService();
+                fullTranscript = await fallback.TranscribeAudioAsync(pcm16Audio, cancellationToken);
+            }
+
             return fullTranscript;
         }
         catch (Exception ex)
         {
-            logger?.LogError(ex, "Whisper transcription failed");
-            return string.Empty;
+            logger?.LogWarning(ex, "Whisper transcription failed, attempting Windows Speech fallback...");
+            try
+            {
+                var fallback = new WindowsSpeechTranscriptionService();
+                return await fallback.TranscribeAudioAsync(pcm16Audio, cancellationToken);
+            }
+            catch
+            {
+                return string.Empty;
+            }
         }
     }
 

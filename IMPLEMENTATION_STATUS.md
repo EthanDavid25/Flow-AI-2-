@@ -2,12 +2,41 @@
 
 **Last updated**: 2026-11-08
 **Build status**: ✅ Builds in Debug & Release (0 errors, 0 warnings)
-**Test status**: ✅ All 41 tests pass (Core:8, AI:6, Vision:3, Cursor:3, Integration:21)
-**Git**: `838c2f0` — application launching, action JSON parsing, voice input fix
+**Test status**: ✅ All 56 tests pass (Core:8, AI:6, Vision:3, Cursor:3, Integration:36)
+**Architecture**: Fully autonomous desktop assistant with deterministic local routing, independent Bézier cursor control, and voice-to-action execution.
 
 ---
 
 ## ✅ Fully Implemented
+
+### Deterministic Local Intent Routing & Fast-Path
+- [x] `DeterministicCommandRouter` — instant zero-latency routing for unambiguous commands (Open Notepad, Open Chrome, Open Calculator, Open Explorer, Switch to App, Close App, Maximize, Minimize)
+- [x] Composite deterministic tasks: "Open Notepad and type <text>", "Open Chrome and search for <query>"
+- [x] Zero cloud or local LLM inference required for standard application commands
+- [x] Window ready verification (`WaitForWindowReadyAsync`) via process handle polling
+
+### Robust Action JSON Parsing & Execution
+- [x] `ActionJsonParser` — full support for:
+  - Exact plain JSON: `{"action": "launch_app", "app": "Notepad"}`
+  - Fenced Markdown blocks (` ```json `, ` ```action `, or untagged ` ``` `)
+  - Inline action tags: `[ACTION:{...}]`
+  - JSON arrays of multiple actions: `[{"action": ...}, {"action": ...}]`
+  - Embedded JSON within conversational text
+- [x] Real-time streaming JSON suppression: prevents raw JSON tokens from cluttering the chat bubble
+- [x] Natural conversational response generation when responses consist entirely of action blocks (e.g. "Opening Notepad...")
+
+### Independent Green Cursor Controller
+- [x] `MoveCursorSmoothlyAsync` — quadratic Bézier flight curve with smoothstep easing (`3t² - 2t³`)
+- [x] Real Windows pointer movement in perfect synchrony with the green companion overlay
+- [x] Native click, double-click, right-click, scroll, and unicode text typing
+- [x] Window and target verification before and after interaction
+
+### Voice Recognition & Audio Pipeline
+- [x] `WasapiAudioRecorder` with automatic 44-byte RIFF/WAVE header wrapping (`WrapInWavHeader`)
+- [x] Whisper.net speech transcription with native WAV metadata parsing
+- [x] Seamless fallback to `WindowsSpeechTranscriptionService` (System.Speech SAPI) if Whisper is unready or empty
+- [x] Shared execution pipeline: voice transcripts and typed inputs route through the exact same task coordinator
+- [x] Push-to-talk (`Ctrl+Alt+Space`) and cancel (`Escape`)
 
 ### Infrastructure & Diagnostics
 - [x] Solution structure — 10 source projects + 5 test projects
@@ -103,24 +132,24 @@ FlowAI.Core.Tests         8/8  ✅
 FlowAI.AI.Tests           6/6  ✅
 FlowAI.Vision.Tests       3/3  ✅
 FlowAI.Cursor.Tests       3/3  ✅
-FlowAI.Integration.Tests 21/21 ✅  (+15 new: ActionJsonParser, ApplicationDiscovery, automation actions)
-Total: 41/41 passing (0 failures)
+FlowAI.Integration.Tests 36/36 ✅  (+30 tests covering ActionJsonParser, DeterministicRouter, AppDiscovery, WAV wrapping)
+Total: 56/56 passing (0 failures)
 ```
 
 ---
 
 ## Launch Command
 
-```powershell
-# 1. Ensure Ollama is running
-ollama serve   # (or it auto-starts as a service)
+Always use the absolute path to launch FlowAI:
 
-# 2. Run FlowAI
+```powershell
+Start-Process "C:\Users\Ethan David\OneDrive\Desktop\FlowAI\src\FlowAI.App\bin\Release\net8.0-windows\FlowAI.exe"
+```
+
+Or from within the project directory:
+
+```powershell
+cd "C:\Users\Ethan David\OneDrive\Desktop\FlowAI"
 $dotnet = "$env:LOCALAPPDATA\Microsoft\dotnet\dotnet.exe"
 & $dotnet run --project "src\FlowAI.App\FlowAI.App.csproj" -c Release
-```
-
-Or after `dotnet publish`:
-```
-src\FlowAI.App\bin\Release\net8.0-windows\FlowAI.exe
 ```

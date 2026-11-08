@@ -246,8 +246,8 @@ public sealed class ApplicationDiscovery
             var proc = Process.Start(startInfo);
             _logger?.LogInformation("Launched '{Name}' from: {Path} (PID {Pid})", appName, exePath, proc?.Id);
 
-            // Brief wait for app to open its window
-            await Task.Delay(1000, cancellationToken);
+            // Wait for application window to appear and become ready
+            await WaitForWindowReadyAsync(appName, 2500, cancellationToken);
             return (true, $"Launched {appName}");
         }
         catch (Exception ex)
@@ -255,6 +255,34 @@ public sealed class ApplicationDiscovery
             _logger?.LogError(ex, "Failed to launch '{Name}' from path: {Path}", appName, exePath);
             return (false, $"Failed to launch {appName}: {ex.Message}");
         }
+    }
+
+    /// <summary>
+    /// Waits for an application's main window to be created and brings it to foreground.
+    /// </summary>
+    public async Task<bool> WaitForWindowReadyAsync(string appName, int timeoutMs = 2500, CancellationToken cancellationToken = default)
+    {
+        var sw = Stopwatch.StartNew();
+        while (sw.ElapsedMilliseconds < timeoutMs && !cancellationToken.IsCancellationRequested)
+        {
+            var proc = FindRunningProcess(appName);
+            if (proc != null)
+            {
+                try
+                {
+                    proc.Refresh();
+                    if (proc.MainWindowHandle != IntPtr.Zero)
+                    {
+                        AppDiscoveryNativeMethods.SetForegroundWindow(proc.MainWindowHandle);
+                        AppDiscoveryNativeMethods.ShowWindow(proc.MainWindowHandle, 9); // SW_RESTORE
+                        return true;
+                    }
+                }
+                catch { }
+            }
+            await Task.Delay(100, cancellationToken);
+        }
+        return false;
     }
 
     private static string? FindInRegistry(string appName)

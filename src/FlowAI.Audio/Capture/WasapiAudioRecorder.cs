@@ -116,8 +116,9 @@ public sealed class WasapiAudioRecorder : IAudioRecordingService
 
             // Resample/convert to 16kHz Mono 16-bit PCM for Whisper
             byte[] pcm16 = ConvertTo16kHzMono16Bit(rawBytes, capture?.WaveFormat);
+            byte[] wavAudio = WrapInWavHeader(pcm16, 16000, 1, 16);
             DisposeCapture();
-            return pcm16;
+            return wavAudio;
         }
     }
 
@@ -231,6 +232,52 @@ public sealed class WasapiAudioRecorder : IAudioRecordingService
             logger?.LogError(ex, "PCM16 conversion failed — returning empty to prevent Whisper hallucination. Input was {Bytes} bytes, format: {Rate}Hz {Channels}ch", rawAudio.Length, sourceFormat?.SampleRate, sourceFormat?.Channels);
             return Array.Empty<byte>();
         }
+    }
+
+    /// <summary>
+    /// Wraps raw 16-bit PCM audio in a valid RIFF/WAVE header so wave parsers (such as Whisper.net)
+    /// can parse format metadata directly from the stream without failing.
+    /// </summary>
+    public static byte[] WrapInWavHeader(byte[] pcmData, int sampleRate = 16000, short channels = 1, short bitsPerSample = 16)
+    {
+        if (pcmData.Length == 0) return Array.Empty<byte>();
+
+        // If already has RIFF header, return as-is
+        if (pcmData.Length >= 4 &&
+            pcmData[0] == 0x52 && pcmData[1] == 0x49 && pcmData[2] == 0x46 && pcmData[3] == 0x46)
+        {
+            return pcmData;
+        }
+
+        using var ms = new MemoryStream();
+        using var bw = new BinaryWriter(ms);
+
+        int byteRate = sampleRate * channels * (bitsPerSample / 8);
+        short blockAlign = (short)(channels * (bitsPerSample / 8));
+        int subChunk2Size = pcmData.Length;
+        int chunkSize = 36 + subChunk2Size;
+
+        // RIFF header
+        bw.Write(System.Text.Encoding.ASCII.GetBytes("RIFF"));
+        bw.Write(chunkSize);
+        bw.Write(System.Text.Encoding.ASCII.GetBytes("WAVE"));
+
+        // "fmt " subchunk
+        bw.Write(System.Text.Encoding.ASCII.GetBytes("fmt "));
+        bw.Write(16); // subchunk1 size for PCM
+        bw.Write((short)1); // audio format: 1 = PCM
+        bw.Write(channels);
+        bw.Write(sampleRate);
+        bw.Write(byteRate);
+        bw.Write(blockAlign);
+        bw.Write(bitsPerSample);
+
+        // "data" subchunk
+        bw.Write(System.Text.Encoding.ASCII.GetBytes("data"));
+        bw.Write(subChunk2Size);
+        bw.Write(pcmData);
+
+        return ms.ToArray();
     }
 
     private void DisposeCapture()
