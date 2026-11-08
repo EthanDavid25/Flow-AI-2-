@@ -67,6 +67,10 @@ public sealed class CompanionManager : IDisposable
     public string AIProviderName => ActiveAI.ProviderName;
     public bool IsAIConnected { get; private set; }
 
+    // ── Public voice control (for Mini Companion mic button) ──────────────────
+    public void StartListening() => OnHotkeyPressed();
+    public void StopListening() => OnHotkeyReleased();
+
     public CompanionManager(
         ILogger<CompanionManager> logger,
         FlowAISettings settings,
@@ -603,21 +607,30 @@ public sealed class CompanionManager : IDisposable
 
         _activeCts?.Cancel();
         _activeCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        TranscriptUpdated?.Invoke(query);
+        var token = _activeCts.Token;
 
-        try
+        // Fire TranscriptUpdated so voice and text paths both show the query bubble via UI.
+        // (CompanionPanelWindow.OnTranscriptUpdated skips if already shown by SendQuery.)
+        TranscriptUpdated?.Invoke(query);
+        _logger.LogInformation("AskTextAsync received: '{Query}'", query);
+
+        // Run pipeline on the thread-pool so the WPF UI thread is NEVER blocked.
+        await Task.Run(async () =>
         {
-            await RunQueryPipelineAsync(query, _activeCts.Token);
-        }
-        catch (OperationCanceledException)
-        {
-            _stateManager.ResetToIdle("Cancelled");
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Text pipeline error");
-            await HandlePipelineErrorAsync(ex.Message);
-        }
+            try
+            {
+                await RunQueryPipelineAsync(query, token);
+            }
+            catch (OperationCanceledException)
+            {
+                _stateManager.ResetToIdle("Cancelled");
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Text pipeline error");
+                await HandlePipelineErrorAsync(ex.Message);
+            }
+        }, token).ContinueWith(_ => { }, TaskContinuationOptions.OnlyOnCanceled);
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────

@@ -11,21 +11,10 @@ namespace FlowAI.App.UI;
 
 /// <summary>
 /// The always-on-top companion panel: chat transcript, text input, state indicator and controls.
-///
-/// This window uses WS_EX_NOACTIVATE to avoid stealing focus from the user's target application.
-/// ShowActivated=False is set in XAML; this code-behind enforces WS_EX_NOACTIVATE via OnSourceInitialized.
+/// ShowActivated=True so the TextBox can receive keyboard focus normally.
 /// </summary>
 public partial class CompanionPanelWindow : Window
 {
-    private const int WS_EX_NOACTIVATE = 0x08000000;
-    private const int GWL_EXSTYLE = -20;
-
-    [System.Runtime.InteropServices.DllImport("user32.dll")]
-    private static extern int GetWindowLong(IntPtr hWnd, int nIndex);
-
-    [System.Runtime.InteropServices.DllImport("user32.dll")]
-    private static extern int SetWindowLong(IntPtr hWnd, int nIndex, int dwNewLong);
-
     // ── State ─────────────────────────────────────────────────────────────────
     private readonly ILogger<CompanionPanelWindow>? _logger;
     private CompanionManager? _manager;
@@ -33,6 +22,7 @@ public partial class CompanionPanelWindow : Window
     private TextBlock? _currentStreamingTextBlock;
     private readonly List<(string role, string text)> _chatHistory = new();
     private const int MaxChatMessages = 20;
+    private MiniCompanionWindow? _miniCompanion;
 
     // ── Events ────────────────────────────────────────────────────────────────
     public event Action? SettingsRequested;
@@ -86,14 +76,27 @@ public partial class CompanionPanelWindow : Window
         ProviderBadge.Text = _manager.AIProviderName;
     }
 
-    // ── Window chrome / no-activate ───────────────────────────────────────────
+    // ── Window chrome ─────────────────────────────────────────────────────────
     protected override void OnSourceInitialized(EventArgs e)
     {
         base.OnSourceInitialized(e);
+        // No WS_EX_NOACTIVATE here — we need the TextBox to receive keyboard focus.
+    }
 
-        var hwnd = new System.Windows.Interop.WindowInteropHelper(this).Handle;
-        int exStyle = GetWindowLong(hwnd, GWL_EXSTYLE);
-        SetWindowLong(hwnd, GWL_EXSTYLE, exStyle | WS_EX_NOACTIVATE);
+    protected override void OnActivated(EventArgs e)
+    {
+        base.OnActivated(e);
+        QueryInput.Focus();
+        Keyboard.Focus(QueryInput);
+    }
+
+    protected override void OnPreviewMouseDown(MouseButtonEventArgs e)
+    {
+        base.OnPreviewMouseDown(e);
+        if (!IsActive)
+        {
+            Activate();
+        }
     }
 
     private void TitleBar_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
@@ -101,9 +104,27 @@ public partial class CompanionPanelWindow : Window
         DragMove();
     }
 
-    private void MinimizeButton_Click(object sender, RoutedEventArgs e) => Hide();
+    private void MinimizeButton_Click(object sender, RoutedEventArgs e) => EnterMiniMode();
 
     private void CloseButton_Click(object sender, RoutedEventArgs e) => QuitRequested?.Invoke();
+
+    // ── Mini Companion Mode ───────────────────────────────────────────────────
+    public void EnterMiniMode()
+    {
+        Hide();
+        if (_miniCompanion == null && _manager != null)
+            _miniCompanion = new MiniCompanionWindow(this, _manager);
+        _miniCompanion?.ShowMini();
+    }
+
+    public void RestoreFromMini()
+    {
+        _miniCompanion?.Hide();
+        Show();
+        Activate();
+        QueryInput.Focus();
+        Keyboard.Focus(QueryInput);
+    }
 
     // ── Position on first show ────────────────────────────────────────────────
     private void PositionNearTaskbar()
@@ -127,7 +148,13 @@ public partial class CompanionPanelWindow : Window
         Dispatcher.BeginInvoke(() =>
         {
             _currentStreamingTextBlock = null;
-            AppendChatBubble("user", text);
+            // For voice queries the transcript arrives here; for text queries the bubble
+            // was already added in SendQuery() so skip duplicates.
+            bool alreadyShown = _chatHistory.Count > 0
+                && _chatHistory[^1].role == "user"
+                && _chatHistory[^1].text == text;
+            if (!alreadyShown)
+                AppendChatBubble("user", text);
         }, DispatcherPriority.Normal);
     }
 
@@ -302,7 +329,8 @@ public partial class CompanionPanelWindow : Window
     // ── Input handling ────────────────────────────────────────────────────────
     private void QueryInput_KeyDown(object sender, KeyEventArgs e)
     {
-        if (e.Key == Key.Enter && !string.IsNullOrWhiteSpace(QueryInput.Text))
+        if (e.Key == Key.Enter && (Keyboard.Modifiers & ModifierKeys.Shift) == 0
+            && !string.IsNullOrWhiteSpace(QueryInput.Text))
         {
             SendQuery();
             e.Handled = true;
@@ -316,7 +344,14 @@ public partial class CompanionPanelWindow : Window
         string query = QueryInput.Text.Trim();
         if (string.IsNullOrWhiteSpace(query) || _manager == null) return;
 
+        _logger?.LogInformation("User text input: {Query}", query);
+
+        // Clear input and immediately show user bubble — don't wait for manager callback
         QueryInput.Text = string.Empty;
+        QueryInput.Focus();
+        Keyboard.Focus(QueryInput);
+        AppendChatBubble("user", query);
+
         _ = _manager.AskTextAsync(query);
     }
 

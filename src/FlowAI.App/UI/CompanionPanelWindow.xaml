@@ -7,7 +7,7 @@
         WindowStyle="None"
         AllowsTransparency="True"
         Background="Transparent"
-        ShowActivated="False"
+        ShowActivated="True"
         ShowInTaskbar="False"
         Topmost="True"
         ResizeMode="CanResize">
@@ -161,7 +161,7 @@
                                 Style="{StaticResource GhostButton}"
                                 FontSize="10" Padding="0"
                                 Click="MinimizeButton_Click"
-                                ToolTip="Hide panel"/>
+                                ToolTip="Mini Companion Mode"/>
                         <Button Content="✕" Width="24" Height="24"
                                 Style="{StaticResource GhostButton}"
                                 FontSize="10" Padding="0" Margin="2,0,0,0"

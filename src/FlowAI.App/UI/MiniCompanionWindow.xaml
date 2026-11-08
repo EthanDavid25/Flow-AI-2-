@@ -1,0 +1,135 @@
+<Window x:Class="FlowAI.App.UI.MiniCompanionWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="FlowAI Mini Companion"
+        Width="220" Height="48"
+        WindowStyle="None"
+        AllowsTransparency="True"
+        Background="Transparent"
+        Topmost="True"
+        ShowInTaskbar="False"
+        ResizeMode="NoResize"
+        WindowStartupLocation="Manual">
+
+    <Window.Resources>
+        <SolidColorBrush x:Key="EmeraldBrush" Color="#00FF88"/>
+        <SolidColorBrush x:Key="EmeraldDimBrush" Color="#00CC6A"/>
+        <SolidColorBrush x:Key="TextPrimary" Color="#E8F5E9"/>
+        <SolidColorBrush x:Key="TextSecondary" Color="#78909C"/>
+
+        <Style x:Key="MiniIconBtn" TargetType="Button">
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="Foreground" Value="#78909C"/>
+            <Setter Property="FontSize" Value="11"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border Background="{TemplateBinding Background}" CornerRadius="12" Padding="2">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter Property="Background" Value="#3300FF88"/>
+                                <Setter Property="Foreground" Value="#00FF88"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+    </Window.Resources>
+
+    <Border x:Name="MiniRootBorder"
+            Background="#E6171918"
+            BorderBrush="{StaticResource EmeraldBrush}"
+            BorderThickness="1.2"
+            CornerRadius="24"
+            Padding="8,4"
+            MouseLeftButtonDown="MiniWidget_MouseLeftButtonDown">
+        <Border.Effect>
+            <DropShadowEffect Color="#00FF88" BlurRadius="12" Opacity="0.4" ShadowDepth="0"/>
+        </Border.Effect>
+
+        <Grid VerticalAlignment="Center">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto"/> <!-- Orb -->
+                <ColumnDefinition Width="*"/>    <!-- Status -->
+                <ColumnDefinition Width="Auto"/> <!-- Mic -->
+                <ColumnDefinition Width="Auto"/> <!-- Restore -->
+                <ColumnDefinition Width="Auto"/> <!-- Close -->
+            </Grid.ColumnDefinitions>
+
+            <!-- Animated Emerald Orb -->
+            <Grid Grid.Column="0" Width="26" Height="26" Margin="0,0,6,0" Cursor="Hand" MouseLeftButtonDown="Orb_MouseLeftButtonDown" ToolTip="Click to restore FlowAI">
+                <Ellipse x:Name="MiniOrbPulse" Width="26" Height="26" Opacity="0.3">
+                    <Ellipse.Fill>
+                        <RadialGradientBrush>
+                            <GradientStop Color="#00FF88" Offset="0"/>
+                            <GradientStop Color="Transparent" Offset="1"/>
+                        </RadialGradientBrush>
+                    </Ellipse.Fill>
+                </Ellipse>
+                <Ellipse x:Name="MiniOrbCore" Width="14" Height="14" HorizontalAlignment="Center" VerticalAlignment="Center">
+                    <Ellipse.Fill>
+                        <RadialGradientBrush>
+                            <GradientStop Color="#00FF88" Offset="0"/>
+                            <GradientStop Color="#00CC6A" Offset="1"/>
+                        </RadialGradientBrush>
+                    </Ellipse.Fill>
+                    <Ellipse.Effect>
+                        <DropShadowEffect Color="#00FF88" BlurRadius="6" ShadowDepth="0" Opacity="0.9"/>
+                    </Ellipse.Effect>
+                </Ellipse>
+            </Grid>
+
+            <!-- Status text -->
+            <TextBlock Grid.Column="1"
+                       x:Name="MiniStatusText"
+                       Text="FlowAI"
+                       Foreground="{StaticResource TextPrimary}"
+                       FontSize="11"
+                       FontWeight="SemiBold"
+                       VerticalAlignment="Center"
+                       TextTrimming="CharacterEllipsis"
+                       Cursor="Hand"
+                       MouseLeftButtonDown="Status_MouseLeftButtonDown"
+                       ToolTip="Drag to move, click to restore FlowAI"/>
+
+            <!-- 🎤 Push to talk -->
+            <Button Grid.Column="2"
+                    x:Name="MiniMicButton"
+                    Content="🎤"
+                    Width="24" Height="24"
+                    Style="{StaticResource MiniIconBtn}"
+                    FontSize="12"
+                    Margin="3,0"
+                    Click="MiniMicButton_Click"
+                    ToolTip="Click to start/stop voice listening"/>
+
+            <!-- ↗ Restore Button -->
+            <Button Grid.Column="3"
+                    x:Name="MiniRestoreButton"
+                    Content="↗"
+                    Width="22" Height="24"
+                    Style="{StaticResource MiniIconBtn}"
+                    FontSize="12"
+                    FontWeight="Bold"
+                    Margin="2,0"
+                    Click="MiniRestoreButton_Click"
+                    ToolTip="Restore FlowAI panel"/>
+
+            <!-- ✕ Hide/Close Button -->
+            <Button Grid.Column="4"
+                    x:Name="MiniCloseButton"
+                    Content="✕"
+                    Width="20" Height="24"
+                    Style="{StaticResource MiniIconBtn}"
+                    FontSize="10"
+                    Margin="1,0,0,0"
+                    Click="MiniCloseButton_Click"
+                    ToolTip="Hide companion to system tray"/>
+        </Grid>
+    </Border>
+</Window>

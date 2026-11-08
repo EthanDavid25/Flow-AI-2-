@@ -177,9 +177,13 @@ public sealed class ApplicationDiscovery
         try
         {
             var processes = Process.GetProcesses();
-            return processes.FirstOrDefault(p =>
+            var matches = processes.Where(p =>
                 p.ProcessName.Equals(processName, StringComparison.OrdinalIgnoreCase) ||
-                p.ProcessName.Contains(searchName, StringComparison.OrdinalIgnoreCase));
+                p.ProcessName.Contains(searchName, StringComparison.OrdinalIgnoreCase)).ToList();
+
+            // Prefer a process that already has a visible window handle (avoids suspended background instances)
+            return matches.FirstOrDefault(p => p.MainWindowHandle != IntPtr.Zero)
+                ?? matches.FirstOrDefault();
         }
         catch
         {
@@ -222,7 +226,19 @@ public sealed class ApplicationDiscovery
         string? exePath = FindApplication(appName);
         if (exePath == null)
         {
-            return (false, $"Could not find application: {appName}");
+            // Last-resort: try shell-execute the app name directly (works for well-registered apps)
+            try
+            {
+                var shellInfo = new ProcessStartInfo(appName) { UseShellExecute = true };
+                Process.Start(shellInfo);
+                _logger?.LogInformation("Shell-launched '{Name}' by name (no resolved path)", appName);
+                await WaitForWindowReadyAsync(appName, 2500, cancellationToken);
+                return (true, $"Launched {appName}");
+            }
+            catch
+            {
+                return (false, $"Could not find or launch application: {appName}");
+            }
         }
 
         // Launch it
