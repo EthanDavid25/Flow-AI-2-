@@ -1,8 +1,9 @@
 # IMPLEMENTATION_STATUS.md — FlowAI
 
-**Last updated**: 2026-11-07
+**Last updated**: 2026-11-08
 **Build status**: ✅ Builds in Debug & Release (0 errors, 0 warnings)
-**Test status**: ✅ All 26 tests pass (Core:8, AI:6, Vision:3, Cursor:3, Integration:6)
+**Test status**: ✅ All 41 tests pass (Core:8, AI:6, Vision:3, Cursor:3, Integration:21)
+**Git**: `838c2f0` — application launching, action JSON parsing, voice input fix
 
 ---
 
@@ -69,8 +70,16 @@
 
 ### Windows Automation
 - [x] `WindowsAutomationEngine` — click, type, scroll, shortcut, UIA invoke
+- [x] **NEW** `launchapplication`, `switchwindow`, `closewindow`, `maximizewindow`, `minimizewindow`, `rightclick`, `doubleclick` action types
+- [x] **NEW** `ApplicationDiscovery` — finds installed apps via well-known paths + registry; launches or activates running instances
 - [x] High-risk action confirmation gate
 - [x] Action verification
+
+### AI Pipeline — Action Protocol
+- [x] **NEW** `ActionJsonParser` — parses `{"action":"launch_app","app":"Chrome"}` JSON blocks from AI responses
+- [x] **NEW** `CompanionManager` — upgraded system prompt teaches AI the ACTION PROTOCOL
+- [x] **NEW** Screen capture skip for screen-free commands (open/close/launch) — saves 1-3 seconds per command
+- [x] **NEW** AI action block execution after response parsing (launch apps, type text, press keys, etc.)
 
 ### Interface & Tools
 - [x] `CompanionPanelWindow` — dark emerald WPF panel with Mode badge (`[AUTO]`, `[ONLINE]`, `[OFFLINE]`) and Provider badge
@@ -87,20 +96,15 @@
 
 ---
 
-## Test Results (2026-11-07)
+## Test Results (2026-11-08)
 
 ```
-FlowAI.Core.Tests        8/8  ✅
-FlowAI.AI.Tests          6/6  ✅
-FlowAI.Vision.Tests      3/3  ✅
-FlowAI.Cursor.Tests      3/3  ✅
-FlowAI.Integration.Tests 6/6  ✅
-Total: 26/26 passing (0 failures)
-```
-FlowAI.Vision.Tests      3/3  ✅
-FlowAI.Cursor.Tests      3/3  ✅
-FlowAI.Integration.Tests 6/6  ✅
-Total                   22/22 ✅
+FlowAI.Core.Tests         8/8  ✅
+FlowAI.AI.Tests           6/6  ✅
+FlowAI.Vision.Tests       3/3  ✅
+FlowAI.Cursor.Tests       3/3  ✅
+FlowAI.Integration.Tests 21/21 ✅  (+15 new: ActionJsonParser, ApplicationDiscovery, automation actions)
+Total: 41/41 passing (0 failures)
 ```
 
 ---

@@ -47,7 +47,9 @@
 
 ## Closed Issues
 
-*(none yet — project in initial release)*
+- **KI-007** — Voice PCM conversion returned raw audio on failure (Whisper hallucination) → Fixed in `838c2f0`
+- **KI-008** — EdgeTtsService swallowed exceptions, blocking Windows Speech fallback → Fixed in `838c2f0`
+- **KI-009** — WindowsAutomationEngine had no `launchapplication` action type → Fixed in `838c2f0`
 
 ---
 
