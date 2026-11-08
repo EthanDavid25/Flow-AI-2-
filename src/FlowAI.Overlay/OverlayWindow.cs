@@ -320,9 +320,10 @@ public class OverlayWindow : Window
     {
         Dispatcher.Invoke(() =>
         {
-            AnimateOpacity(targetBoundingBox, 0.0, 0.3);
-            AnimateOpacity(targetLabelBadge, 0.0, 0.3);
-            AnimateOpacity(responseBubble, 0.0, 0.3);
+            activeFlight = null;
+            AnimateOpacity(targetBoundingBox, 0.0, 0.25);
+            AnimateOpacity(targetLabelBadge, 0.0, 0.25);
+            AnimateOpacity(responseBubble, 0.0, 0.25);
             mode = CompanionMode.FollowingCursor;
         });
     }

@@ -46,7 +46,9 @@ public interface IElementDiscoveryService
 public interface IAudioRecordingService : IDisposable
 {
     event Action<float>? AudioLevelChanged; // RMS level (0.0 to 1.0)
+    event Action<byte[]>? UtteranceDetected; // Raised automatically when user finishes speaking (VAD)
     bool IsRecording { get; }
+    bool AutoVadEnabled { get; set; }
     void StartRecording();
     byte[] StopRecordingAndGetPcm16();
     void CancelRecording();

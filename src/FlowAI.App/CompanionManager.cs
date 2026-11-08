@@ -107,6 +107,16 @@ public sealed class CompanionManager : IDisposable
         _hotkey.HotkeyReleased += OnHotkeyReleased;
         _hotkey.EscapePressed += OnEscapePressed;
         _recorder.AudioLevelChanged += OnAudioLevel;
+        _recorder.UtteranceDetected += OnAutoUtteranceDetected;
+    }
+
+    private void OnAutoUtteranceDetected(byte[] audio)
+    {
+        if (_stateManager.CurrentState != FlowAIState.Listening) return;
+        _logger.LogInformation("VAD auto-submitted utterance ({Bytes} bytes)", audio.Length);
+        _activeCts?.Cancel();
+        _activeCts = new CancellationTokenSource();
+        _ = Task.Run(() => RunVoicePipelineAsync(audio, _activeCts.Token), _activeCts.Token);
     }
 
     // ── Initialisation ────────────────────────────────────────────────────────
@@ -227,6 +237,11 @@ public sealed class CompanionManager : IDisposable
         {
             _logger.LogError(ex, "Voice pipeline error");
             await HandlePipelineErrorAsync(ex.Message);
+        }
+        finally
+        {
+            // Always dismiss bounding box / overlays when voice pipeline ends
+            _overlay.DismissAll();
         }
     }
 
@@ -487,6 +502,13 @@ public sealed class CompanionManager : IDisposable
             });
         }
 
+        // Keep highlight visible briefly so user sees the target, then auto-dismiss
+        if (targets.Count > 0)
+        {
+            await Task.Delay(1200, cancellationToken);
+            _overlay.DismissAll();
+        }
+
         _stateManager.ResetToIdle("Pipeline complete");
         StatusUpdated?.Invoke("Ready");
     }
@@ -561,6 +583,9 @@ public sealed class CompanionManager : IDisposable
             }
         }
 
+        // Always dismiss target highlight and return cursor overlay to following state
+        _overlay.DismissAll();
+
         _stateManager.ResetToIdle("Local command complete");
     }
 
@@ -625,6 +650,7 @@ public sealed class CompanionManager : IDisposable
         ResponseUpdated?.Invoke(finishMsg);
         _stateManager.TransitionTo(FlowAIState.Speaking, "Workflow finished");
         await _tts.SpeakAsync(finishMsg, cancellationToken);
+        _overlay.DismissAll();
         _stateManager.ResetToIdle("Workflow complete");
     }
 
@@ -657,6 +683,10 @@ public sealed class CompanionManager : IDisposable
             {
                 _logger.LogError(ex, "Text pipeline error");
                 await HandlePipelineErrorAsync(ex.Message);
+            }
+            finally
+            {
+                _overlay.DismissAll();
             }
         }, token).ContinueWith(_ => { }, TaskContinuationOptions.OnlyOnCanceled);
     }

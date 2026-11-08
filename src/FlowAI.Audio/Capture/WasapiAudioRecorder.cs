@@ -9,12 +9,16 @@ namespace FlowAI.Audio.Capture;
 public sealed class WasapiAudioRecorder : IAudioRecordingService
 {
     private readonly ILogger<WasapiAudioRecorder>? logger;
+    private readonly VoiceActivityDetector vad = new();
     private WasapiCapture? capture;
     private MemoryStream? recordedAudioStream;
     private readonly object syncLock = new();
     private bool isRecording;
 
     public event Action<float>? AudioLevelChanged;
+    public event Action<byte[]>? UtteranceDetected;
+
+    public bool AutoVadEnabled { get; set; } = true;
 
     public bool IsRecording
     {
@@ -105,6 +109,7 @@ public sealed class WasapiAudioRecorder : IAudioRecordingService
                 capture.RecordingStopped += HandleRecordingStopped;
 
                 recordedAudioStream = new MemoryStream();
+                vad.Reset();
                 capture.StartRecording();
                 isRecording = true;
                 logger?.LogInformation("Started WASAPI mic recording on {DeviceName} ({Rate}Hz {Ch}ch)",
@@ -169,6 +174,24 @@ public sealed class WasapiAudioRecorder : IAudioRecordingService
         // Calculate RMS power for audio-reactive waveform
         float rms = CalculateRmsLevel(e.Buffer, e.BytesRecorded, capture?.WaveFormat);
         AudioLevelChanged?.Invoke(rms);
+
+        // VAD endpoint detection when enabled
+        if (AutoVadEnabled && isRecording)
+        {
+            bool endpointReached = vad.ProcessAudioFrame(rms);
+            if (endpointReached)
+            {
+                logger?.LogInformation("VAD detected end-of-speech silence endpoint. Triggering auto-submit.");
+                Task.Run(() =>
+                {
+                    byte[] audio = StopRecordingAndGetPcm16();
+                    if (audio.Length > 0)
+                    {
+                        UtteranceDetected?.Invoke(audio);
+                    }
+                });
+            }
+        }
     }
 
     private void HandleRecordingStopped(object? sender, StoppedEventArgs e)
