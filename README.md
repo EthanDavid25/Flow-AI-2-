@@ -1,6 +1,6 @@
-# FlowAI — Windows AI Cursor Companion
+# FlowAI (Flow-AI-2-) — Windows AI Cursor Companion
 
-A native Windows desktop application that brings an intelligent, voice-driven AI companion to your cursor. Inspired by the open-source [Clicky](https://github.com/farzaa/clicky) project.
+A desktop AI assistant for Windows with voice interaction, screen understanding, and automated computer control. Inspired by the open-source [Clicky](https://github.com/farzaa/clicky) project.
 
 ![FlowAI](.assets/banner.png)
 
