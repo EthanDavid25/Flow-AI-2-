@@ -507,6 +507,34 @@ public sealed class CompanionManager : IDisposable
             {
                 _logger.LogWarning("Action {Action} failed: {Msg}", action.ActionType, result.Message);
             }
+            else if (action.ActionType.Equals("launchapplication", StringComparison.OrdinalIgnoreCase) ||
+                     action.ActionType.Equals("switchwindow", StringComparison.OrdinalIgnoreCase))
+            {
+                // Smoothly glide green cursor and mouse pointer to the application window
+                try
+                {
+                    string targetApp = action.Parameter ?? action.Description;
+                    var proc = ApplicationDiscovery.FindRunningProcess(targetApp);
+                    if (proc != null && proc.MainWindowHandle != IntPtr.Zero)
+                    {
+                        if (AppNativeMethods.GetWindowRect(proc.MainWindowHandle, out var rect))
+                        {
+                            int targetX = (rect.Left + rect.Right) / 2;
+                            int targetY = Math.Max(rect.Top + 24, (rect.Top + rect.Bottom) / 2);
+                            var target = new DetectedTarget(targetX, targetY, targetApp)
+                            {
+                                BoundingBox = new BoundingBox(rect.Left, rect.Top, Math.Max(60, rect.Right - rect.Left), Math.Max(40, rect.Bottom - rect.Top))
+                            };
+                            _overlay.FlyToTarget(target);
+                            await WindowsAutomationEngine.MoveCursorSmoothlyAsync(targetX, targetY, 350, cancellationToken);
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger?.LogDebug(ex, "Cursor guidance to launched window skipped");
+                }
+            }
             await Task.Delay(200, cancellationToken);
         }
 
@@ -796,4 +824,16 @@ internal static class AppNativeMethods
 
     [System.Runtime.InteropServices.DllImport("user32.dll")]
     internal static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint lpdwProcessId);
+
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    internal static extern bool GetWindowRect(IntPtr hWnd, out RECT lpRect);
+
+    [System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Sequential)]
+    internal struct RECT
+    {
+        public int Left;
+        public int Top;
+        public int Right;
+        public int Bottom;
+    }
 }

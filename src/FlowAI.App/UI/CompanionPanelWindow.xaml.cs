@@ -317,6 +317,37 @@ public partial class CompanionPanelWindow : Window
         StateText.Text = label;
         StateOrbColor.Color = color;
 
+        // Dynamic PTT button state
+        switch (state)
+        {
+            case FlowAIState.Listening:
+                PttButton.Content = "⏹ Stop & Send";
+                PttButton.Background = new SolidColorBrush(Color.FromArgb(100, 0, 255, 136));
+                break;
+            case FlowAIState.Transcribing:
+                PttButton.Content = "📝 Transcribing…";
+                PttButton.Background = Brushes.Transparent;
+                break;
+            case FlowAIState.Thinking:
+            case FlowAIState.AnalysingScreen:
+                PttButton.Content = "💭 Thinking…";
+                PttButton.Background = Brushes.Transparent;
+                break;
+            case FlowAIState.Executing:
+            case FlowAIState.Guiding:
+                PttButton.Content = "⚡ Executing…";
+                PttButton.Background = Brushes.Transparent;
+                break;
+            case FlowAIState.Speaking:
+                PttButton.Content = "🔊 Speaking…";
+                PttButton.Background = Brushes.Transparent;
+                break;
+            default:
+                PttButton.Content = "🎤 Talk  (Ctrl+Alt+Space)";
+                PttButton.Background = Brushes.Transparent;
+                break;
+        }
+
         // Pulse animation on the orb
         var pulse = new DoubleAnimation(0.4, 1.0, TimeSpan.FromMilliseconds(600))
         {
@@ -355,8 +386,20 @@ public partial class CompanionPanelWindow : Window
         _ = _manager.AskTextAsync(query);
     }
 
-    // ── PTT button (mouse hold) ───────────────────────────────────────────────
-    // These are backup buttons; real PTT is handled by the low-level keyboard hook.
+    // ── PTT button (click toggle or mouse hold) ──────────────────────────────
+    private void PttButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (_manager == null) return;
+        if (_manager.CurrentState == FlowAIState.Listening)
+        {
+            _manager.StopListening();
+        }
+        else
+        {
+            _manager.StartListening();
+        }
+    }
+
     private void PttButton_Down(object sender, MouseButtonEventArgs e)
     {
         PttButton.Background = new SolidColorBrush(Color.FromArgb(80, 0, 255, 136));

@@ -313,12 +313,13 @@
 
                     <!-- Push-to-talk -->
                     <Button x:Name="PttButton"
-                            Content="🎤 Hold to Talk  (Ctrl+Alt+Space)"
+                            Content="🎤 Talk  (Ctrl+Alt+Space)"
                             Style="{StaticResource GhostButton}"
                             Margin="2"
+                            Click="PttButton_Click"
                             PreviewMouseLeftButtonDown="PttButton_Down"
                             PreviewMouseLeftButtonUp="PttButton_Up"
-                            ToolTip="Hold to record voice query"/>
+                            ToolTip="Click to start/stop or hold to record voice query"/>
 
                     <Button Content="⚙ Settings"
                             Style="{StaticResource GhostButton}"

@@ -68,17 +68,36 @@ public sealed class WasapiAudioRecorder : IAudioRecordingService
             try
             {
                 var deviceEnumerator = new MMDeviceEnumerator();
-                MMDevice targetDevice;
+                MMDevice? targetDevice = null;
 
                 string? configuredId = FlowAI.Core.Configuration.FlowAISettings.Current.InputDeviceId;
                 if (!string.IsNullOrWhiteSpace(configuredId))
                 {
-                    try { targetDevice = deviceEnumerator.GetDevice(configuredId); }
-                    catch { targetDevice = deviceEnumerator.GetDefaultAudioEndpoint(DataFlow.Capture, Role.Communications); }
+                    try { targetDevice = deviceEnumerator.GetDevice(configuredId); } catch { }
                 }
-                else
+
+                if (targetDevice == null)
                 {
-                    targetDevice = deviceEnumerator.GetDefaultAudioEndpoint(DataFlow.Capture, Role.Communications);
+                    try { targetDevice = deviceEnumerator.GetDefaultAudioEndpoint(DataFlow.Capture, Role.Communications); } catch { }
+                }
+                if (targetDevice == null)
+                {
+                    try { targetDevice = deviceEnumerator.GetDefaultAudioEndpoint(DataFlow.Capture, Role.Multimedia); } catch { }
+                }
+                if (targetDevice == null)
+                {
+                    try { targetDevice = deviceEnumerator.GetDefaultAudioEndpoint(DataFlow.Capture, Role.Console); } catch { }
+                }
+                if (targetDevice == null)
+                {
+                    var activeEndpoints = deviceEnumerator.EnumerateAudioEndPoints(DataFlow.Capture, DeviceState.Active);
+                    targetDevice = activeEndpoints.FirstOrDefault();
+                }
+
+                if (targetDevice == null)
+                {
+                    logger?.LogWarning("No active audio capture device found on this system");
+                    return;
                 }
 
                 capture = new WasapiCapture(targetDevice);
@@ -88,7 +107,8 @@ public sealed class WasapiAudioRecorder : IAudioRecordingService
                 recordedAudioStream = new MemoryStream();
                 capture.StartRecording();
                 isRecording = true;
-                logger?.LogInformation("Started WASAPI mic recording on {DeviceName}", targetDevice.FriendlyName);
+                logger?.LogInformation("Started WASAPI mic recording on {DeviceName} ({Rate}Hz {Ch}ch)",
+                    targetDevice.FriendlyName, capture.WaveFormat.SampleRate, capture.WaveFormat.Channels);
             }
             catch (Exception ex)
             {
@@ -223,15 +243,105 @@ public sealed class WasapiAudioRecorder : IAudioRecordingService
             }
 
             byte[] result = outputStream.ToArray();
-            logger?.LogInformation("PCM conversion: {InputBytes} raw → {OutputBytes} PCM16 @ 16kHz",
-                rawAudio.Length, result.Length);
-            return result;
+            if (result.Length > 0)
+            {
+                logger?.LogInformation("PCM conversion (MF): {InputBytes} raw → {OutputBytes} PCM16 @ 16kHz",
+                    rawAudio.Length, result.Length);
+                return result;
+            }
         }
         catch (Exception ex)
         {
-            logger?.LogError(ex, "PCM16 conversion failed — returning empty to prevent Whisper hallucination. Input was {Bytes} bytes, format: {Rate}Hz {Channels}ch", rawAudio.Length, sourceFormat?.SampleRate, sourceFormat?.Channels);
+            logger?.LogWarning(ex, "MediaFoundationResampler failed; falling back to pure managed resampler");
+        }
+
+        // Pure managed fallback: works unconditionally across all audio formats
+        try
+        {
+            byte[] managedResult = ConvertManagedTo16kHzMono16Bit(rawAudio, sourceFormat);
+            logger?.LogInformation("PCM conversion (Managed): {InputBytes} raw → {OutputBytes} PCM16 @ 16kHz",
+                rawAudio.Length, managedResult.Length);
+            return managedResult;
+        }
+        catch (Exception ex)
+        {
+            logger?.LogError(ex, "Both MF and Managed PCM conversions failed on {Bytes} bytes", rawAudio.Length);
             return Array.Empty<byte>();
         }
+    }
+
+    private static byte[] ConvertManagedTo16kHzMono16Bit(byte[] rawAudio, WaveFormat sourceFormat)
+    {
+        int channels = Math.Max(1, sourceFormat.Channels);
+        int sampleRate = sourceFormat.SampleRate;
+        int bitsPerSample = sourceFormat.BitsPerSample;
+        bool isFloat = sourceFormat.Encoding == WaveFormatEncoding.IeeeFloat;
+
+        int bytesPerSample = Math.Max(1, bitsPerSample / 8);
+        int frameSize = channels * bytesPerSample;
+        int totalFrames = rawAudio.Length / frameSize;
+        if (totalFrames == 0) return Array.Empty<byte>();
+
+        float[] monoSamples = new float[totalFrames];
+
+        for (int f = 0; f < totalFrames; f++)
+        {
+            float channelSum = 0f;
+            int frameOffset = f * frameSize;
+
+            for (int ch = 0; ch < channels; ch++)
+            {
+                int sampleOffset = frameOffset + ch * bytesPerSample;
+                float sampleVal = 0f;
+
+                if (isFloat && bytesPerSample == 4 && sampleOffset + 4 <= rawAudio.Length)
+                {
+                    sampleVal = BitConverter.ToSingle(rawAudio, sampleOffset);
+                }
+                else if (bitsPerSample == 16 && sampleOffset + 2 <= rawAudio.Length)
+                {
+                    short s = BitConverter.ToInt16(rawAudio, sampleOffset);
+                    sampleVal = s / 32768f;
+                }
+                else if (bitsPerSample == 24 && sampleOffset + 3 <= rawAudio.Length)
+                {
+                    int s = (rawAudio[sampleOffset] << 8) | (rawAudio[sampleOffset + 1] << 16) | (rawAudio[sampleOffset + 2] << 24);
+                    sampleVal = s / 2147483648f;
+                }
+                else if (bitsPerSample == 32 && sampleOffset + 4 <= rawAudio.Length)
+                {
+                    int s = BitConverter.ToInt32(rawAudio, sampleOffset);
+                    sampleVal = s / 2147483648f;
+                }
+
+                channelSum += sampleVal;
+            }
+
+            monoSamples[f] = channelSum / channels;
+        }
+
+        // Resample from sourceRate to 16,000 Hz
+        int targetRate = 16000;
+        int outputCount = (int)((long)monoSamples.Length * targetRate / sampleRate);
+        byte[] output = new byte[outputCount * 2];
+        double ratio = (double)sampleRate / targetRate;
+
+        for (int outIdx = 0; outIdx < outputCount; outIdx++)
+        {
+            double srcIdx = outIdx * ratio;
+            int idxFloor = (int)srcIdx;
+            int idxCeil = Math.Min(idxFloor + 1, monoSamples.Length - 1);
+            double frac = srcIdx - idxFloor;
+
+            float interpolated = (float)(monoSamples[idxFloor] * (1.0 - frac) + monoSamples[idxCeil] * frac);
+            interpolated = Math.Clamp(interpolated, -1.0f, 1.0f);
+            short shortSample = (short)Math.Round(interpolated * 32767.0);
+
+            output[outIdx * 2] = (byte)(shortSample & 0xFF);
+            output[outIdx * 2 + 1] = (byte)((shortSample >> 8) & 0xFF);
+        }
+
+        return output;
     }
 
     /// <summary>

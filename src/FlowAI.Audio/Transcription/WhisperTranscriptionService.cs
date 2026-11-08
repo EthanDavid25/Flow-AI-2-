@@ -65,8 +65,28 @@ public sealed class WhisperTranscriptionService : ITranscriptionService
 
     public async Task<string> TranscribeAudioAsync(byte[] pcm16Audio, CancellationToken cancellationToken = default)
     {
-        if (pcm16Audio.Length < 3200) // Less than 100ms of audio
+        // 16kHz 16-bit mono = 32,000 bytes/sec. Require at least ~250ms of audio (8,000 bytes)
+        if (pcm16Audio.Length < 8000)
         {
+            logger?.LogInformation("Audio buffer too short ({Bytes} bytes) — ignoring", pcm16Audio.Length);
+            return string.Empty;
+        }
+
+        // Quick silence check: calculate RMS of the raw audio data (skip 44-byte WAV header if present)
+        int offset = (pcm16Audio.Length >= 44 && pcm16Audio[0] == 0x52 && pcm16Audio[1] == 0x49) ? 44 : 0;
+        double sumSquares = 0;
+        int sampleCount = 0;
+        for (int i = offset; i < pcm16Audio.Length - 1; i += 2)
+        {
+            short sample = BitConverter.ToInt16(pcm16Audio, i);
+            double norm = sample / 32768.0;
+            sumSquares += norm * norm;
+            sampleCount++;
+        }
+        double rms = sampleCount > 0 ? Math.Sqrt(sumSquares / sampleCount) : 0;
+        if (rms < 0.005)
+        {
+            logger?.LogInformation("Audio buffer is silent (RMS={Rms:F4}) — ignoring", rms);
             return string.Empty;
         }
 
@@ -75,8 +95,11 @@ public sealed class WhisperTranscriptionService : ITranscriptionService
             await EnsureModelReadyAsync(cancellationToken);
             if (whisperFactory == null) return string.Empty;
 
-            using var processor = whisperFactory.CreateBuilder()
-                .WithLanguage("auto")
+            // Use await using because WhisperProcessor implements IAsyncDisposable;
+            // synchronous Dispose() throws "Cannot dispose while processing, please use DisposeAsync instead".
+            // Explicitly set language to "en" for instant processing and avoiding language-detection overhead.
+            await using var processor = whisperFactory.CreateBuilder()
+                .WithLanguage("en")
                 .Build();
 
             using var audioStream = new MemoryStream(pcm16Audio);

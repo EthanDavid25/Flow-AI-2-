@@ -26,6 +26,26 @@ public sealed class ApplicationDiscovery
             @"%PROGRAMFILES(X86)%\Google\Chrome\Application\chrome.exe",
             @"%LOCALAPPDATA%\Google\Chrome\Application\chrome.exe"
         ],
+        ["claude"] = [
+            @"%LOCALAPPDATA%\Microsoft\WindowsApps\claude-desktop.exe",
+            @"%LOCALAPPDATA%\Programs\Claude\Claude.exe",
+            @"%PROGRAMFILES%\Claude\Claude.exe",
+            @"%LOCALAPPDATA%\AnthropicClaude\claude.exe"
+        ],
+        ["claude desktop"] = [
+            @"%LOCALAPPDATA%\Microsoft\WindowsApps\claude-desktop.exe",
+            @"%LOCALAPPDATA%\Programs\Claude\Claude.exe",
+            @"%PROGRAMFILES%\Claude\Claude.exe",
+            @"%LOCALAPPDATA%\AnthropicClaude\claude.exe"
+        ],
+        ["valorant"] = [
+            @"C:\Riot Games\Riot Client\RiotClientServices.exe",
+            @"C:\Riot Games\VALORANT\live\VALORANT.exe",
+            @"%PROGRAMDATA%\Microsoft\Windows\Start Menu\Programs\Riot Games\VALORANT.lnk"
+        ],
+        ["riot client"] = [
+            @"C:\Riot Games\Riot Client\RiotClientServices.exe"
+        ],
         ["firefox"] = [
             @"%PROGRAMFILES%\Mozilla Firefox\firefox.exe",
             @"%PROGRAMFILES(X86)%\Mozilla Firefox\firefox.exe"
@@ -80,6 +100,14 @@ public sealed class ApplicationDiscovery
             @"%LOCALAPPDATA%\Microsoft\WindowsApps\MicrosoftTeams.exe"
         ],
         ["vscode"] = [
+            @"%LOCALAPPDATA%\Programs\Microsoft VS Code\Code.exe",
+            @"%PROGRAMFILES%\Microsoft VS Code\Code.exe"
+        ],
+        ["vs code"] = [
+            @"%LOCALAPPDATA%\Programs\Microsoft VS Code\Code.exe",
+            @"%PROGRAMFILES%\Microsoft VS Code\Code.exe"
+        ],
+        ["code"] = [
             @"%LOCALAPPDATA%\Programs\Microsoft VS Code\Code.exe",
             @"%PROGRAMFILES%\Microsoft VS Code\Code.exe"
         ],
@@ -171,6 +199,9 @@ public sealed class ApplicationDiscovery
             "microsoftteams" or "teams" => "Teams",
             "visualstudiocode" or "vscode" or "code" => "Code",
             "notepadplusplus" or "notepad++" => "notepad++",
+            "claude" or "claudedesktop" => "claude-desktop",
+            "valorant" => "VALORANT",
+            "riotclient" => "RiotClientServices",
             _ => searchName
         };
 
@@ -179,6 +210,8 @@ public sealed class ApplicationDiscovery
             var processes = Process.GetProcesses();
             var matches = processes.Where(p =>
                 p.ProcessName.Equals(processName, StringComparison.OrdinalIgnoreCase) ||
+                (processName == "claude-desktop" && p.ProcessName.Contains("claude", StringComparison.OrdinalIgnoreCase) && !p.ProcessName.Contains("ssh", StringComparison.OrdinalIgnoreCase)) ||
+                (processName == "VALORANT" && (p.ProcessName.Equals("VALORANT", StringComparison.OrdinalIgnoreCase) || p.ProcessName.Contains("riot", StringComparison.OrdinalIgnoreCase))) ||
                 p.ProcessName.Contains(searchName, StringComparison.OrdinalIgnoreCase)).ToList();
 
             // Prefer a process that already has a visible window handle (avoids suspended background instances)
@@ -200,7 +233,33 @@ public sealed class ApplicationDiscovery
         string? arguments = null,
         CancellationToken cancellationToken = default)
     {
-        // Check if already running
+        // Special folder shortcuts
+        if (appName.Contains("download", StringComparison.OrdinalIgnoreCase))
+        {
+            try
+            {
+                Process.Start(new ProcessStartInfo("explorer.exe", "shell:Downloads") { UseShellExecute = true });
+                return (true, "Opened Downloads folder");
+            }
+            catch (Exception ex)
+            {
+                return (false, $"Failed to open Downloads: {ex.Message}");
+            }
+        }
+        if (appName.Contains("document", StringComparison.OrdinalIgnoreCase))
+        {
+            try
+            {
+                Process.Start(new ProcessStartInfo("explorer.exe", "shell:Personal") { UseShellExecute = true });
+                return (true, "Opened Documents folder");
+            }
+            catch (Exception ex)
+            {
+                return (false, $"Failed to open Documents: {ex.Message}");
+            }
+        }
+
+        // Check if already running with an active window
         var runningProc = FindRunningProcess(appName);
         if (runningProc != null)
         {
@@ -226,6 +285,21 @@ public sealed class ApplicationDiscovery
         string? exePath = FindApplication(appName);
         if (exePath == null)
         {
+            // For Claude: if desktop app is not installed, open claude.ai in browser
+            if (appName.Contains("claude", StringComparison.OrdinalIgnoreCase))
+            {
+                try
+                {
+                    Process.Start(new ProcessStartInfo("https://claude.ai") { UseShellExecute = true });
+                    _logger?.LogInformation("Claude desktop not found; opened https://claude.ai in browser");
+                    return (true, "Claude Desktop app not found; opened Claude in your web browser.");
+                }
+                catch (Exception ex)
+                {
+                    return (false, $"Could not open Claude in browser: {ex.Message}");
+                }
+            }
+
             // Last-resort: try shell-execute the app name directly (works for well-registered apps)
             try
             {
@@ -256,6 +330,13 @@ public sealed class ApplicationDiscovery
                 if (exePath.Contains("Discord") && exePath.Contains("Update.exe"))
                 {
                     startInfo.Arguments = "--processStart Discord.exe";
+                }
+
+                // For Valorant launched via RiotClientServices:
+                if (appName.Equals("valorant", StringComparison.OrdinalIgnoreCase) &&
+                    exePath.Contains("RiotClientServices.exe", StringComparison.OrdinalIgnoreCase))
+                {
+                    startInfo.Arguments = "--launch-product=valorant --launch-patchline=live";
                 }
             }
 
@@ -318,12 +399,18 @@ public sealed class ApplicationDiscovery
                     using var key = hive.OpenSubKey(regKey);
                     if (key == null) continue;
 
-                    // Try exact match with .exe
+                    // Try exact match with .exe or prefix match (excluding helper/ssh/updater executables)
                     string[] subKeys = key.GetSubKeyNames();
                     var match = subKeys.FirstOrDefault(k =>
                         k.Equals(appName + ".exe", StringComparison.OrdinalIgnoreCase) ||
-                        k.Equals(appName, StringComparison.OrdinalIgnoreCase) ||
-                        k.StartsWith(appName, StringComparison.OrdinalIgnoreCase));
+                        k.Equals(appName, StringComparison.OrdinalIgnoreCase))
+                        ?? subKeys.FirstOrDefault(k =>
+                            k.StartsWith(appName, StringComparison.OrdinalIgnoreCase)
+                            && !k.Contains("ssh", StringComparison.OrdinalIgnoreCase)
+                            && !k.Contains("askpass", StringComparison.OrdinalIgnoreCase)
+                            && !k.Contains("crashpad", StringComparison.OrdinalIgnoreCase)
+                            && !k.Contains("helper", StringComparison.OrdinalIgnoreCase)
+                            && !k.Contains("updater", StringComparison.OrdinalIgnoreCase));
 
                     if (match != null)
                     {

@@ -114,18 +114,23 @@ public partial class MiniCompanionWindow : Window
             case FlowAIState.Listening:
                 MiniStatusText.Text = "Listening…";
                 MiniStatusText.Foreground = new SolidColorBrush(Color.FromRgb(0, 255, 136));
+                MiniMicButton.Content = "⏹";
+                MiniMicButton.ToolTip = "Click to stop recording and send";
                 MiniOrbPulse.BeginAnimation(UIElement.OpacityProperty, CreatePulseAnimation());
                 break;
 
             case FlowAIState.Transcribing:
                 MiniStatusText.Text = "Transcribing…";
                 MiniStatusText.Foreground = new SolidColorBrush(Color.FromRgb(232, 245, 233));
+                MiniMicButton.Content = "🎤";
+                MiniMicButton.ToolTip = "Click to start voice listening";
                 break;
 
             case FlowAIState.Thinking:
             case FlowAIState.AnalysingScreen:
                 MiniStatusText.Text = "Thinking…";
                 MiniStatusText.Foreground = new SolidColorBrush(Color.FromRgb(255, 215, 64));
+                MiniMicButton.Content = "🎤";
                 MiniOrbPulse.BeginAnimation(UIElement.OpacityProperty, CreatePulseAnimation());
                 break;
 
@@ -133,16 +138,19 @@ public partial class MiniCompanionWindow : Window
             case FlowAIState.Guiding:
                 MiniStatusText.Text = "Executing…";
                 MiniStatusText.Foreground = new SolidColorBrush(Color.FromRgb(0, 255, 136));
+                MiniMicButton.Content = "🎤";
                 break;
 
             case FlowAIState.Speaking:
                 MiniStatusText.Text = "Speaking…";
                 MiniStatusText.Foreground = new SolidColorBrush(Color.FromRgb(128, 222, 234));
+                MiniMicButton.Content = "🎤";
                 break;
 
             case FlowAIState.Error:
                 MiniStatusText.Text = "Error";
                 MiniStatusText.Foreground = new SolidColorBrush(Color.FromRgb(255, 82, 82));
+                MiniMicButton.Content = "🎤";
                 MiniOrbPulse.BeginAnimation(UIElement.OpacityProperty, null);
                 MiniOrbPulse.Opacity = 0.8;
                 break;
@@ -150,6 +158,8 @@ public partial class MiniCompanionWindow : Window
             default:
                 MiniStatusText.Text = "FlowAI";
                 MiniStatusText.Foreground = new SolidColorBrush(Color.FromRgb(232, 245, 233));
+                MiniMicButton.Content = "🎤";
+                MiniMicButton.ToolTip = "Click to start voice listening";
                 MiniOrbPulse.BeginAnimation(UIElement.OpacityProperty, null);
                 MiniOrbPulse.Opacity = 0.3;
                 break;

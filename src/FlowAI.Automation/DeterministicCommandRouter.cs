@@ -30,6 +30,26 @@ public static class DeterministicCommandRouter
         string normalized = CleanInput(userText);
         if (string.IsNullOrEmpty(normalized)) return null;
 
+        // ── 0. Greetings & wake words ─────────────────────────────────────────
+        if (normalized.Equals("hello", StringComparison.OrdinalIgnoreCase) ||
+            normalized.Equals("hi", StringComparison.OrdinalIgnoreCase) ||
+            normalized.Equals("hey", StringComparison.OrdinalIgnoreCase) ||
+            normalized.Equals("hello flowai", StringComparison.OrdinalIgnoreCase) ||
+            normalized.Equals("hey flowai", StringComparison.OrdinalIgnoreCase) ||
+            normalized.Equals("good morning", StringComparison.OrdinalIgnoreCase) ||
+            normalized.Equals("good afternoon", StringComparison.OrdinalIgnoreCase) ||
+            normalized.Equals("good evening", StringComparison.OrdinalIgnoreCase))
+        {
+            return new DeterministicPlan
+            {
+                IsMatched = true,
+                Description = "Greeting",
+                UserFacingMessage = "Hello! I'm FlowAI, your desktop assistant. How can I help you?",
+                SpokenConfirmation = "Hello! How can I help you?",
+                Actions = []
+            };
+        }
+
         // ── 1. Composite: Open Chrome and search for <query> ───────────────────
         var chromeSearchMatch = Regex.Match(normalized,
             @"^(?:open|launch|start)\s+(?:google\s+)?chrome\s+(?:and\s+)?(?:search\s+for|search|google)\s+(.+)$",
@@ -85,9 +105,64 @@ public static class DeterministicCommandRouter
             return plan;
         }
 
-        // ── 2. Composite: Open <app> and type <text> ──────────────────────────
+        // ── 1b. Standalone search: "search for <query>", "search <query> on google", "google <query>"
+        var directSearchMatch = Regex.Match(normalized,
+            @"^(?:search\s+for|search|google)\s+(.+?)(?:\s+on\s+google|\s+in\s+google)?$",
+            RegexOptions.IgnoreCase);
+
+        if (directSearchMatch.Success && !normalized.StartsWith("open", StringComparison.OrdinalIgnoreCase))
+        {
+            string query = directSearchMatch.Groups[1].Value.Trim();
+            var plan = new DeterministicPlan
+            {
+                IsMatched = true,
+                Description = $"Search Google for '{query}'",
+                UserFacingMessage = $"Searching Google for \"{query}\"...",
+                SpokenConfirmation = $"Searching for {query} on Google."
+            };
+
+            plan.Actions.Add(new AutomationAction
+            {
+                ActionType = "launchapplication",
+                Description = "Open Google Chrome",
+                Parameter = "chrome",
+                RiskLevel = ActionRiskLevel.Low,
+                UserConfirmed = true
+            });
+
+            plan.Actions.Add(new AutomationAction
+            {
+                ActionType = "shortcut",
+                Description = "Focus address bar",
+                Parameter = "Ctrl+L",
+                RiskLevel = ActionRiskLevel.Low,
+                UserConfirmed = true
+            });
+
+            plan.Actions.Add(new AutomationAction
+            {
+                ActionType = "typetext",
+                Description = "Type search query",
+                Parameter = query,
+                RiskLevel = ActionRiskLevel.Low,
+                UserConfirmed = true
+            });
+
+            plan.Actions.Add(new AutomationAction
+            {
+                ActionType = "shortcut",
+                Description = "Submit search",
+                Parameter = "Enter",
+                RiskLevel = ActionRiskLevel.Low,
+                UserConfirmed = true
+            });
+
+            return plan;
+        }
+
+        // ── 2. Composite: Open <app> and type/calculate <text> ────────────────
         var openAndTypeMatch = Regex.Match(normalized,
-            @"^(?:open|launch|start)\s+([a-z0-9\+\.\s]+?)\s+(?:and\s+)?(?:type|write|enter)\s+(.+)$",
+            @"^(?:open|launch|start)\s+([a-z0-9\+\.\s]+?)\s+(?:and\s+)?(?:type|write|enter|perform|calculate|do)\s+(.+)$",
             RegexOptions.IgnoreCase);
 
         if (openAndTypeMatch.Success)
@@ -243,6 +318,9 @@ public static class DeterministicCommandRouter
             string app = CleanAppName(openMatch.Groups[1].Value);
             if (!string.IsNullOrEmpty(app))
             {
+                // If it still contains " and ", it is a complex compound instruction that should be handled by AI
+                if (app.Contains(" and ", StringComparison.OrdinalIgnoreCase)) return null;
+
                 return new DeterministicPlan
                 {
                     IsMatched = true,

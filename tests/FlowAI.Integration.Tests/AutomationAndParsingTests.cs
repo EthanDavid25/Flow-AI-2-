@@ -361,4 +361,59 @@ public class AutomationAndParsingTests
         Assert.False(result.Success);
         Assert.Contains("Unsupported action type", result.Message);
     }
+
+    [Theory]
+    [InlineData("Hello FlowAI")]
+    [InlineData("hello")]
+    [InlineData("Hi")]
+    [InlineData("hey")]
+    public void DeterministicCommandRouter_RoutesGreetings(string query)
+    {
+        var plan = DeterministicCommandRouter.TryRoute(query);
+        Assert.NotNull(plan);
+        Assert.True(plan.IsMatched);
+        Assert.Equal("Greeting", plan.Description);
+        Assert.Contains("Hello", plan.UserFacingMessage);
+    }
+
+    [Theory]
+    [InlineData("search something on google", "something")]
+    [InlineData("google weather today", "weather today")]
+    [InlineData("search for quantum computing", "quantum computing")]
+    public void DeterministicCommandRouter_RoutesDirectWebSearch(string query, string expectedSearch)
+    {
+        var plan = DeterministicCommandRouter.TryRoute(query);
+        Assert.NotNull(plan);
+        Assert.True(plan.IsMatched);
+        Assert.Equal(4, plan.Actions.Count);
+        Assert.Equal("launchapplication", plan.Actions[0].ActionType);
+        Assert.Equal("typetext", plan.Actions[2].ActionType);
+        Assert.Equal(expectedSearch, plan.Actions[2].Parameter);
+    }
+
+    [Fact]
+    public void DeterministicCommandRouter_RoutesValorantAndClaude()
+    {
+        var valorantPlan = DeterministicCommandRouter.TryRoute("Open Valorant");
+        Assert.NotNull(valorantPlan);
+        Assert.True(valorantPlan.IsMatched);
+        Assert.Equal("launchapplication", valorantPlan.Actions[0].ActionType);
+        Assert.Equal("Valorant", valorantPlan.Actions[0].Parameter);
+
+        var claudePlan = DeterministicCommandRouter.TryRoute("Open Claude");
+        Assert.NotNull(claudePlan);
+        Assert.True(claudePlan.IsMatched);
+        Assert.Equal("launchapplication", claudePlan.Actions[0].ActionType);
+        Assert.Equal("Claude", claudePlan.Actions[0].Parameter);
+    }
+
+    [Fact]
+    public void ApplicationDiscovery_FindsGoogleChrome()
+    {
+        var discovery = new ApplicationDiscovery();
+        string? chromePath = discovery.FindApplication("chrome");
+        Assert.NotNull(chromePath);
+        Assert.True(File.Exists(chromePath));
+        Assert.Contains("chrome.exe", chromePath, StringComparison.OrdinalIgnoreCase);
+    }
 }
