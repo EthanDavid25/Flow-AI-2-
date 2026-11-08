@@ -59,7 +59,15 @@ public sealed class EdgeTtsService : ITextToSpeechService
         }
         catch (Exception ex)
         {
-            logger?.LogWarning("Edge TTS synthesis or playback failed: {Message}", ex.Message);
+            if (ex.Message.Contains("403") || ex.Message.Contains("WebSocketException"))
+            {
+                logger?.LogWarning("Edge TTS returned 403 — API version may be stale. See KI-001 in KNOWN_ISSUES.md");
+            }
+            else
+            {
+                logger?.LogWarning("Edge TTS synthesis or playback failed: {Message}", ex.Message);
+            }
+            throw; // Re-throw so CompanionManager can fall back to Windows Speech
         }
     }
 

@@ -11,6 +11,7 @@ using FlowAI.App.UI;
 using FlowAI.Audio.Capture;
 using FlowAI.Audio.Transcription;
 using FlowAI.Audio.Tts;
+using FlowAI.Automation;
 using FlowAI.Automation.Engine;
 using FlowAI.Core.Configuration;
 using FlowAI.Core.Interfaces;
@@ -181,7 +182,12 @@ public partial class App : Application
         services.AddSingleton<ILearningEngine, LearningEngine>();
 
         // Automation
-        services.AddSingleton<IComputerAutomationService, WindowsAutomationEngine>();
+        services.AddSingleton<ApplicationDiscovery>();
+        services.AddSingleton<IComputerAutomationService>(sp =>
+            new WindowsAutomationEngine(
+                sp.GetRequiredService<IElementDiscoveryService>(),
+                sp.GetRequiredService<ApplicationDiscovery>(),
+                sp.GetService<ILogger<WindowsAutomationEngine>>()));
 
         // Hotkey
         services.AddSingleton<GlobalHotkeyMonitor>();

@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Windows.Automation;
+using FlowAI.Automation;
 using FlowAI.Automation.Native;
 using FlowAI.Core.Configuration;
 using FlowAI.Core.Interfaces;
@@ -12,12 +13,15 @@ public sealed class WindowsAutomationEngine : IComputerAutomationService
 {
     private readonly IElementDiscoveryService discoveryService;
     private readonly ILogger<WindowsAutomationEngine>? logger;
+    private readonly ApplicationDiscovery appDiscovery;
 
     public WindowsAutomationEngine(
         IElementDiscoveryService discoveryService,
+        ApplicationDiscovery? appDiscovery = null,
         ILogger<WindowsAutomationEngine>? logger = null)
     {
         this.discoveryService = discoveryService;
+        this.appDiscovery = appDiscovery ?? new ApplicationDiscovery(null);
         this.logger = logger;
     }
 
@@ -63,6 +67,31 @@ public sealed class WindowsAutomationEngine : IComputerAutomationService
                     break;
                 case "invokeuia":
                     ExecuteInvokeUia(action);
+                    break;
+                case "launchapplication":
+                case "launch":
+                case "openapp":
+                case "open":
+                    await ExecuteLaunchApplicationAsync(action, cancellationToken);
+                    break;
+                case "switchwindow":
+                case "activatewindow":
+                    ExecuteSwitchWindow(action);
+                    break;
+                case "closewindow":
+                    ExecuteCloseWindow(action);
+                    break;
+                case "maximizewindow":
+                    ExecuteMaximizeWindow(action);
+                    break;
+                case "minimizewindow":
+                    ExecuteMinimizeWindow(action);
+                    break;
+                case "rightclick":
+                    await ExecuteRightClickAsync(action, cancellationToken);
+                    break;
+                case "doubleclick":
+                    await ExecuteDoubleClickAsync(action, cancellationToken);
                     break;
                 default:
                     return new AutomationResult
@@ -193,4 +222,96 @@ public sealed class WindowsAutomationEngine : IComputerAutomationService
             }
         }
     }
+
+    private async Task ExecuteLaunchApplicationAsync(AutomationAction action, CancellationToken ct)
+    {
+        string appName = action.Parameter ?? action.Description;
+        appName = appName
+            .Replace("open ", string.Empty, StringComparison.OrdinalIgnoreCase)
+            .Replace("launch ", string.Empty, StringComparison.OrdinalIgnoreCase)
+            .Replace("start ", string.Empty, StringComparison.OrdinalIgnoreCase)
+            .Trim();
+
+        logger?.LogInformation("Launching application: '{Name}'", appName);
+        var (success, message) = await appDiscovery.LaunchOrActivateAsync(appName, cancellationToken: ct);
+        if (!success)
+            throw new InvalidOperationException(message);
+    }
+
+    private static void ExecuteSwitchWindow(AutomationAction action)
+    {
+        string processName = action.Parameter ?? string.Empty;
+        var proc = ApplicationDiscovery.FindRunningProcess(processName);
+        if (proc != null)
+        {
+            var hwnd = proc.MainWindowHandle;
+            if (hwnd != IntPtr.Zero)
+            {
+                AutomationNativeMethods.SetForegroundWindow(hwnd);
+                NativeWindowOps.ShowWindow(hwnd, 9); // SW_RESTORE
+            }
+        }
+    }
+
+    private static void ExecuteCloseWindow(AutomationAction action)
+    {
+        string processName = action.Parameter ?? string.Empty;
+        var proc = ApplicationDiscovery.FindRunningProcess(processName);
+        proc?.CloseMainWindow();
+    }
+
+    private static void ExecuteMaximizeWindow(AutomationAction action)
+    {
+        string processName = action.Parameter ?? string.Empty;
+        var proc = ApplicationDiscovery.FindRunningProcess(processName);
+        if (proc != null && proc.MainWindowHandle != IntPtr.Zero)
+            NativeWindowOps.ShowWindow(proc.MainWindowHandle, 3); // SW_MAXIMIZE
+    }
+
+    private static void ExecuteMinimizeWindow(AutomationAction action)
+    {
+        string processName = action.Parameter ?? string.Empty;
+        var proc = ApplicationDiscovery.FindRunningProcess(processName);
+        if (proc != null && proc.MainWindowHandle != IntPtr.Zero)
+            NativeWindowOps.ShowWindow(proc.MainWindowHandle, 6); // SW_MINIMIZE
+    }
+
+    private static async Task ExecuteRightClickAsync(AutomationAction action, CancellationToken ct)
+    {
+        if (action.Target != null)
+        {
+            int x = (int)Math.Round(action.Target.TargetPoint.X);
+            int y = (int)Math.Round(action.Target.TargetPoint.Y);
+            AutomationNativeMethods.SetCursorPos(x, y);
+            await Task.Delay(40, ct);
+            AutomationNativeMethods.mouse_event(AutomationNativeMethods.MOUSEEVENTF_RIGHTDOWN, x, y, 0, UIntPtr.Zero);
+            await Task.Delay(30, ct);
+            AutomationNativeMethods.mouse_event(AutomationNativeMethods.MOUSEEVENTF_RIGHTUP, x, y, 0, UIntPtr.Zero);
+        }
+    }
+
+    private static async Task ExecuteDoubleClickAsync(AutomationAction action, CancellationToken ct)
+    {
+        if (action.Target != null)
+        {
+            int x = (int)Math.Round(action.Target.TargetPoint.X);
+            int y = (int)Math.Round(action.Target.TargetPoint.Y);
+            AutomationNativeMethods.SetCursorPos(x, y);
+            await Task.Delay(40, ct);
+            AutomationNativeMethods.mouse_event(AutomationNativeMethods.MOUSEEVENTF_LEFTDOWN, x, y, 0, UIntPtr.Zero);
+            await Task.Delay(30, ct);
+            AutomationNativeMethods.mouse_event(AutomationNativeMethods.MOUSEEVENTF_LEFTUP, x, y, 0, UIntPtr.Zero);
+            await Task.Delay(80, ct);
+            AutomationNativeMethods.mouse_event(AutomationNativeMethods.MOUSEEVENTF_LEFTDOWN, x, y, 0, UIntPtr.Zero);
+            await Task.Delay(30, ct);
+            AutomationNativeMethods.mouse_event(AutomationNativeMethods.MOUSEEVENTF_LEFTUP, x, y, 0, UIntPtr.Zero);
+        }
+    }
+}
+
+/// <summary>Extra P/Invoke for window show/hide — avoids duplicating SetForegroundWindow already in AutomationNativeMethods.</summary>
+internal static class NativeWindowOps
+{
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    internal static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
 }

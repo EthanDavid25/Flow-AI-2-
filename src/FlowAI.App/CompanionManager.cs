@@ -261,11 +261,21 @@ public sealed class CompanionManager : IDisposable
             }
         }
 
-        // 2. Capture screen
-        _stateManager.TransitionTo(FlowAIState.AnalysingScreen, "Query ready");
-        StatusUpdated?.Invoke("Reading screen…");
+        // 2. Capture screen (skip for simple open/close/launch commands to save time)
+        bool needsScreen = !IsScreenFreeCommand(userText);
+        IReadOnlyList<CapturedScreen> screens;
 
-        var screens = await _capture.CaptureAllScreensAsync(cancellationToken);
+        if (needsScreen)
+        {
+            _stateManager.TransitionTo(FlowAIState.AnalysingScreen, "Query ready");
+            StatusUpdated?.Invoke("Reading screen…");
+            screens = await _capture.CaptureAllScreensAsync(cancellationToken);
+        }
+        else
+        {
+            _logger.LogInformation("Skipping screen capture for screen-free command: '{Text}'", userText);
+            screens = Array.Empty<CapturedScreen>();
+        }
 
         // 3. Build AI request
         _stateManager.TransitionTo(FlowAIState.Thinking, "Screen captured");
@@ -361,8 +371,37 @@ public sealed class CompanionManager : IDisposable
         var screenInfos = screens.Select(s => s.ScreenInfo).ToList();
         var targets = PointProtocolParser.ParseTargets(fullRawResponse, out string cleanText, screenInfos);
 
+        // 5b. Parse and execute structured action blocks (launch_app, type_text, etc.)
+        var parsedActions = ActionJsonParser.ParseActions(fullRawResponse);
+        cleanText = ActionJsonParser.StripActionBlocks(cleanText);
+
+        if (parsedActions.Count > 0)
+        {
+            _stateManager.TransitionTo(FlowAIState.Executing, "Executing AI actions");
+            foreach (var parsedAction in parsedActions)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                var automationAction = new AutomationAction
+                {
+                    ActionType  = parsedAction.ToAutomationActionType(),
+                    Description = $"{parsedAction.ActionType} {parsedAction.App ?? parsedAction.Text ?? string.Empty}",
+                    Parameter   = parsedAction.GetParameter(),
+                    RiskLevel   = GetRiskLevel(parsedAction.ActionType),
+                    UserConfirmed = true  // AI-initiated actions are pre-approved
+                };
+                _logger.LogInformation("Executing action: {Type} param='{Param}'",
+                    automationAction.ActionType, automationAction.Parameter);
+                StatusUpdated?.Invoke($"Running: {automationAction.Description}…");
+
+                var result = await _automation.ExecuteActionAsync(automationAction, cancellationToken);
+                if (!result.Success)
+                    _logger.LogWarning("Action {Type} failed: {Msg}", parsedAction.ActionType, result.Message);
+            }
+        }
+
         ResponseUpdated?.Invoke(cleanText);
-        _logger.LogInformation("AI response ({N} targets): {Text}", targets.Count, cleanText);
+        _logger.LogInformation("AI response ({N} targets, {A} actions): {Text}",
+            targets.Count, parsedActions.Count, cleanText);
 
         // 6. Fly to targets
         if (targets.Count > 0)
@@ -519,21 +558,37 @@ public sealed class CompanionManager : IDisposable
     private string BuildSystemPrompt(IReadOnlyList<CapturedScreen> screens)
     {
         var sb = new StringBuilder();
-        sb.AppendLine("You are FlowAI, an intelligent Windows desktop companion.");
-        sb.AppendLine("You can see the user's screen and help them find UI elements, explain what's visible, and guide them.");
+        sb.AppendLine("You are FlowAI, an intelligent Windows desktop AI companion.");
+        sb.AppendLine("You can see the user's screen, help them find UI elements, guide their cursor, and perform computer actions.");
         sb.AppendLine();
-        sb.AppendLine("COORDINATE PROTOCOL:");
-        sb.AppendLine("When pointing to a specific UI element, embed coordinates using:");
-        sb.AppendLine("  [POINT:x,y:label]      — for a single point");
-        sb.AppendLine("  [BOX:x,y,w,h:label]    — for a bounding box (x,y = top-left, w = width, h = height)");
-        sb.AppendLine("All coordinates are in absolute screen pixels.");
-        sb.AppendLine("For multi-monitor: append :screenN (e.g. :screen1) where N is 0-based.");
+        sb.AppendLine("COORDINATE PROTOCOL (for pointing to screen elements):");
+        sb.AppendLine("  [POINT:x,y:label]      — single screen point (absolute pixels)");
+        sb.AppendLine("  [BOX:x,y,w,h:label]    — bounding box (x,y = top-left)");
+        sb.AppendLine("  For multi-monitor: append :screenN (e.g. :screen1) where N is 0-based.");
+        sb.AppendLine();
+        sb.AppendLine("ACTION PROTOCOL (for computer actions, embed JSON in action blocks):");
+        sb.AppendLine("  ```action");
+        sb.AppendLine("  {\"action\": \"launch_app\", \"app\": \"Google Chrome\"}");
+        sb.AppendLine("  ```");
+        sb.AppendLine("  Supported actions:");
+        sb.AppendLine("    launch_app:    {\"action\":\"launch_app\",\"app\":\"AppName\"}");
+        sb.AppendLine("    type_text:     {\"action\":\"type_text\",\"text\":\"text to type\"}");
+        sb.AppendLine("    press_key:     {\"action\":\"press_key\",\"key\":\"Enter\"}");
+        sb.AppendLine("    click:         {\"action\":\"click\"} — combine with [POINT] for where to click");
+        sb.AppendLine("    scroll_down:   {\"action\":\"scroll_down\"}");
+        sb.AppendLine("    scroll_up:     {\"action\":\"scroll_up\"}");
+        sb.AppendLine("    switch_window: {\"action\":\"switch_window\",\"app\":\"ProcessName\"}");
+        sb.AppendLine("    close_window:  {\"action\":\"close_window\",\"app\":\"ProcessName\"}");
+        sb.AppendLine("    maximize:      {\"action\":\"maximize\",\"app\":\"ProcessName\"}");
+        sb.AppendLine("    minimize:      {\"action\":\"minimize\",\"app\":\"ProcessName\"}");
         sb.AppendLine();
         sb.AppendLine("RULES:");
-        sb.AppendLine("- Be concise. Answers under 3 sentences unless detail is explicitly requested.");
-        sb.AppendLine("- When guiding: always include at least one [POINT] or [BOX] tag for the target.");
-        sb.AppendLine("- Never include coordinates for text responses that don't involve pointing.");
+        sb.AppendLine("- Be concise. Answers under 3 sentences unless detail requested.");
+        sb.AppendLine("- Use action blocks for launching apps, typing, pressing keys — NOT [POINT] tags.");
+        sb.AppendLine("- Use [POINT] or [BOX] only when pointing to something visible on screen.");
+        sb.AppendLine("- Never invent pixel coordinates — only output real positions from the actual screenshot.");
         sb.AppendLine("- Respect user privacy — do not describe sensitive personal data.");
+        sb.AppendLine("- When asked to 'open X', 'launch X', or 'start X': ALWAYS use the launch_app action block.");
 
         if (screens.Count > 0)
         {
@@ -560,6 +615,36 @@ public sealed class CompanionManager : IDisposable
         }
         catch { return "Unknown"; }
     }
+
+    /// <summary>
+    /// Returns true for commands that do not require a screen capture:
+    /// launching apps, window management, quit, etc.
+    /// </summary>
+    private static bool IsScreenFreeCommand(string text)
+    {
+        string lower = text.ToLowerInvariant();
+        string[] screenFreeKeywords =
+        [
+            "open ", "launch ", "start ", "close ", "quit ", "exit app",
+            "maximize", "minimize", "switch to", "switch window",
+            "open chrome", "open notepad", "open spotify", "open discord",
+            "open firefox", "open edge", "open terminal", "open settings",
+            "open calculator", "open paint", "open word", "open excel",
+            "open powerpoint", "open outlook", "open teams", "open slack",
+            "open vscode", "open visual studio", "open file explorer"
+        ];
+        return screenFreeKeywords.Any(k => lower.Contains(k));
+    }
+
+    private static ActionRiskLevel GetRiskLevel(string actionType) => actionType.ToLowerInvariant() switch
+    {
+        "launch_app" or "open_app" or "open" or "launch"  => ActionRiskLevel.Low,
+        "switch_window" or "focus_app" or "switch_app"    => ActionRiskLevel.Low,
+        "maximize" or "minimize"                           => ActionRiskLevel.Low,
+        "type_text" or "type" or "input"                  => ActionRiskLevel.High,
+        "close_window" or "close_app"                     => ActionRiskLevel.Medium,
+        _                                                  => ActionRiskLevel.Medium
+    };
 
     // ── Teaching session helpers ──────────────────────────────────────────────
     public void StartTeachingSession(string workflowName, string description, string targetApp)

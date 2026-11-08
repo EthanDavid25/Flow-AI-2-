@@ -112,6 +112,7 @@ public sealed class WasapiAudioRecorder : IAudioRecordingService
 
             isRecording = false;
             byte[] rawBytes = recordedAudioStream?.ToArray() ?? Array.Empty<byte>();
+            logger?.LogInformation("Raw captured audio: {Bytes} bytes from WASAPI", rawBytes.Length);
 
             // Resample/convert to 16kHz Mono 16-bit PCM for Whisper
             byte[] pcm16 = ConvertTo16kHzMono16Bit(rawBytes, capture?.WaveFormat);
@@ -190,12 +191,19 @@ public sealed class WasapiAudioRecorder : IAudioRecordingService
         return (float)Math.Clamp(rms * 4.0, 0.0, 1.0);
     }
 
-    private static byte[] ConvertTo16kHzMono16Bit(byte[] rawAudio, WaveFormat? sourceFormat)
+    private byte[] ConvertTo16kHzMono16Bit(byte[] rawAudio, WaveFormat? sourceFormat)
     {
-        if (rawAudio.Length == 0 || sourceFormat == null) return Array.Empty<byte>();
+        if (rawAudio.Length == 0 || sourceFormat == null)
+        {
+            logger?.LogWarning("ConvertTo16kHzMono16Bit: empty input or null format");
+            return Array.Empty<byte>();
+        }
 
         try
         {
+            // MediaFoundation must be initialized before using MediaFoundationResampler
+            NAudio.MediaFoundation.MediaFoundationApi.Startup();
+
             using var inputStream = new MemoryStream(rawAudio);
             using var rawReader = new RawSourceWaveStream(inputStream, sourceFormat);
 
@@ -213,11 +221,15 @@ public sealed class WasapiAudioRecorder : IAudioRecordingService
                 outputStream.Write(buffer, 0, read);
             }
 
-            return outputStream.ToArray();
+            byte[] result = outputStream.ToArray();
+            logger?.LogInformation("PCM conversion: {InputBytes} raw → {OutputBytes} PCM16 @ 16kHz",
+                rawAudio.Length, result.Length);
+            return result;
         }
-        catch
+        catch (Exception ex)
         {
-            return rawAudio;
+            logger?.LogError(ex, "PCM16 conversion failed — returning empty to prevent Whisper hallucination. Input was {Bytes} bytes, format: {Rate}Hz {Channels}ch", rawAudio.Length, sourceFormat?.SampleRate, sourceFormat?.Channels);
+            return Array.Empty<byte>();
         }
     }
 
