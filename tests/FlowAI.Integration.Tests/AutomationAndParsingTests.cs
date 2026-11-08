@@ -15,7 +15,7 @@ namespace FlowAI.Integration.Tests;
 /// </summary>
 public class AutomationAndParsingTests
 {
-    // ── ActionJsonParser tests ─────────────────────────────────────────────────
+    // â”€â”€ ActionJsonParser tests â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     [Fact]
     public void ActionJsonParser_ParsesExactNotepadPlainJson()
@@ -176,7 +176,7 @@ public class AutomationAndParsingTests
         Assert.Equal("120", scrollUp.GetParameter());
     }
 
-    // ── DeterministicCommandRouter tests ───────────────────────────────────────
+    // â”€â”€ DeterministicCommandRouter tests â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     [Theory]
     [InlineData("Open Notepad", "notepad")]
@@ -258,7 +258,7 @@ public class AutomationAndParsingTests
         Assert.Null(plan);
     }
 
-    // ── ApplicationDiscovery tests ─────────────────────────────────────────────
+    // â”€â”€ ApplicationDiscovery tests â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     [Fact]
     public void ApplicationDiscovery_FindsNotepad_Always()
@@ -308,7 +308,7 @@ public class AutomationAndParsingTests
         }
     }
 
-    // ── WAV audio wrapping test (Whisper fix) ──────────────────────────────────
+    // â”€â”€ WAV audio wrapping test (Whisper fix) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     [Fact]
     public void WasapiAudioRecorder_WrapInWavHeader_GeneratesValidRiffHeader()
@@ -341,7 +341,7 @@ public class AutomationAndParsingTests
         Assert.Equal((byte)'a', wavBytes[39]);
     }
 
-    // ── WindowsAutomationEngine new actions tests ──────────────────────────────
+    // â”€â”€ WindowsAutomationEngine new actions tests â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     [Fact]
     public async Task WindowsAutomationEngine_RejectsUnsupportedAction_Gracefully()
@@ -415,5 +415,21 @@ public class AutomationAndParsingTests
         Assert.NotNull(chromePath);
         Assert.True(File.Exists(chromePath));
         Assert.Contains("chrome.exe", chromePath, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Theory]
+    [InlineData("Open North Park.", "notepad")]
+    [InlineData("open calculator. calculator", "calculator")]
+    [InlineData("Open Note pad", "notepad")]
+    [InlineData("open crome", "google chrome")]
+    [InlineData("open valorent", "valorant")]
+    [InlineData("open claud desktop", "claude")]
+    public void DeterministicCommandRouter_NormalizesSpokenAppAliases(string query, string expectedApp)
+    {
+        var plan = DeterministicCommandRouter.TryRoute(query);
+        Assert.NotNull(plan);
+        Assert.True(plan.IsMatched);
+        Assert.Equal("launchapplication", plan.Actions[0].ActionType);
+        Assert.Equal(expectedApp, plan.Actions[0].Parameter, ignoreCase: true);
     }
 }

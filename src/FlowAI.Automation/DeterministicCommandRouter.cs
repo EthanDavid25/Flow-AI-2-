@@ -371,13 +371,37 @@ public static class DeterministicCommandRouter
 
     private static string CleanAppName(string raw)
     {
-        string name = raw.Trim().TrimEnd('.', '!', '?');
+        string name = raw.Trim().TrimEnd('.', '!', '?', ';');
         if (name.StartsWith("the ", StringComparison.OrdinalIgnoreCase))
             name = name.Substring(4).Trim();
         if (name.EndsWith(" app", StringComparison.OrdinalIgnoreCase))
             name = name.Substring(0, name.Length - 4).Trim();
         if (name.EndsWith(" application", StringComparison.OrdinalIgnoreCase))
             name = name.Substring(0, name.Length - 12).Trim();
+
+        // Handle speech repetition e.g. "calculator. calculator" or "notepad notepad"
+        string[] parts = name.Split(new[] { ' ', '.', ',' }, StringSplitOptions.RemoveEmptyEntries);
+        if (parts.Length == 2 && parts[0].Equals(parts[1], StringComparison.OrdinalIgnoreCase))
+        {
+            name = parts[0];
+        }
+
+        // Apply phonetic speech normalization for common Whisper misheard names
+        name = NormalizeSpokenAppName(name);
         return name;
+    }
+
+    private static string NormalizeSpokenAppName(string appName)
+    {
+        string lower = appName.ToLowerInvariant().Trim();
+        return lower switch
+        {
+            "north park" or "northpark" or "note park" or "notepark" or "note pack" or "notepack" or "know pad" or "note pad" => "notepad",
+            "crome" or "chrom" or "google chrom" => "google chrome",
+            "valorent" or "val rant" or "wall rant" or "volorant" or "vallorant" => "valorant",
+            "cloud" or "clod" or "claud" or "clawed" or "claud desktop" => "claude",
+            "calc" or "calculate" => "calculator",
+            _ => appName
+        };
     }
 }
